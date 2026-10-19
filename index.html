@@ -1,0 +1,963 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Con Game Planner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&family=Chivo:wght@400;600;700&family=Chivo+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: program-booklet grid — filters rail on the left, day columns of event "tickets" on a time axis. */
+:root{
+  --paper:#EDF1EF; --surface:#FAFCFB; --sunk:#E2E8E5; --ink:#15212A; --muted:#566670; --line:#C8D2CE;
+  --teal:#0F5C5A; --teal-2:#3E8E7E; --teal-3:#B7D8D0; --on-teal:#FFFFFF;
+  --gold:#C98A00; --gold-soft:#F6E2A8; --busy:#6B7780; --busy-soft:#D7DDDF; --warn:#B4441B;
+  --display:"Big Shoulders Display","Arial Narrow",Impact,sans-serif;
+  --body:"Chivo",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"Chivo Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --hour:64px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --paper:#11191D; --surface:#182227; --sunk:#0D1417; --ink:#E5ECE9; --muted:#94A3A4; --line:#2B393E;
+  --teal:#3FA597; --teal-2:#2C7A6F; --teal-3:#1F4A44; --on-teal:#06110F;
+  --gold:#F0B83A; --gold-soft:#4A3A12; --busy:#8A979E; --busy-soft:#27333A; --warn:#F07A4E; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --paper:#11191D; --surface:#182227; --sunk:#0D1417; --ink:#E5ECE9; --muted:#94A3A4; --line:#2B393E;
+  --teal:#3FA597; --teal-2:#2C7A6F; --teal-3:#1F4A44; --on-teal:#06110F;
+  --gold:#F0B83A; --gold-soft:#4A3A12; --busy:#8A979E; --busy-soft:#27333A; --warn:#F07A4E; color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--paper);color:var(--ink);font:14px/1.45 var(--body);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 32px}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+h1,h2,h3{font-family:var(--display);letter-spacing:.01em;text-wrap:balance;margin:0}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+
+/* Top bar */
+.top{display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px;padding-block:16px 12px;border-bottom:2px solid var(--ink)}
+.brand{display:flex;align-items:baseline;gap:10px;margin-right:auto}
+.brand h1{font-size:30px;font-weight:800;text-transform:uppercase;line-height:1}
+.brand .tag{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.conpick{display:flex;flex-direction:column;gap:2px;min-width:0}
+.conpick select{max-width:min(340px,80vw);padding:6px 8px;border:1px solid var(--line);background:var(--surface);border-radius:4px}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border:1px solid var(--line);border-radius:999px;font-size:12px;background:var(--surface);white-space:nowrap}
+.chip .dot{width:7px;height:7px;border-radius:50%;background:var(--busy)}
+.chip.ok .dot{background:var(--teal)}
+.btn{border:1px solid var(--ink);background:var(--surface);padding:7px 12px;border-radius:4px;cursor:pointer;font-weight:600}
+.btn:hover{background:var(--sunk)}
+.btn.primary{background:var(--ink);color:var(--paper)}
+.btn.primary:hover{opacity:.9}
+.btn.small{padding:4px 9px;font-size:12px}
+.btn[disabled]{opacity:.5;cursor:not-allowed}
+.linkbtn{background:none;border:0;color:var(--teal);text-decoration:underline;cursor:pointer;padding:0;font-weight:600}
+
+.status{display:flex;align-items:center;gap:10px;min-height:28px;padding-block:6px;font-size:13px;color:var(--muted)}
+.status[hidden]{display:none!important}
+.bar{flex:0 0 160px;height:4px;background:var(--sunk);border-radius:2px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--teal);transition:width .2s}
+
+.banner{margin-block:12px 0;padding:10px 14px;border:1px dashed var(--gold);background:var(--gold-soft);border-radius:4px;display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center}
+.banner strong{font-weight:700}
+
+/* Layout */
+.layout{display:grid;grid-template-columns:280px minmax(0,1fr);gap:20px;margin-top:16px;align-items:start}
+@media (max-width:860px){.layout{grid-template-columns:minmax(0,1fr)}}
+.side{display:flex;flex-direction:column;gap:18px;position:sticky;top:12px}
+@media (max-width:860px){.side{position:static}}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.panel h2{font-size:18px;text-transform:uppercase}
+.row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.slider{display:grid;grid-template-columns:1fr 34px;gap:2px 8px;align-items:center}
+.slider label{font-size:13px}
+.slider output{font-family:var(--mono);font-size:12px;text-align:right;color:var(--muted)}
+.slider input{grid-column:1 / -1;width:100%;accent-color:var(--teal)}
+.check{display:flex;gap:8px;align-items:flex-start;font-size:13px;cursor:pointer}
+.check input{margin-top:2px;accent-color:var(--teal)}
+.types{display:flex;flex-direction:column;gap:4px;max-height:160px;overflow:auto}
+.search{width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:4px;background:var(--paper)}
+details.collapse summary{cursor:pointer;font-family:var(--display);font-size:18px;text-transform:uppercase;font-weight:700;list-style:none}
+details.collapse summary::after{content:" +";color:var(--muted)}
+details.collapse[open] summary::after{content:" −"}
+
+/* Main */
+.viewbar{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:space-between}
+.tabs{display:inline-flex;border:1px solid var(--ink);border-radius:4px;overflow:hidden}
+.tabs button{border:0;background:var(--surface);padding:7px 14px;cursor:pointer;font-weight:600}
+.tabs button[aria-selected="true"]{background:var(--ink);color:var(--paper)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{width:14px;height:10px;border-radius:2px;display:inline-block}
+.sw.must{background:var(--teal)} .sw.strong{background:var(--teal-2)} .sw.maybe{background:var(--teal-3)}
+.sw.busy{background:repeating-linear-gradient(135deg,var(--busy-soft) 0 4px,var(--surface) 4px 8px);border:1px solid var(--busy)}
+.sw.star{background:var(--gold)}
+.summary{display:flex;gap:10px;flex-wrap:wrap;margin-block:12px}
+.daycard{border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:8px 12px;min-width:150px;display:flex;flex-direction:column;gap:2px}
+.daycard h3{font-size:20px;text-transform:uppercase}
+.daycard .facts{font-size:12px;color:var(--muted)}
+.cta{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;padding:10px 12px;border:1px solid var(--teal);border-radius:6px;background:var(--surface);margin-bottom:12px}
+
+/* Grid */
+.gridScroll{overflow:auto;max-height:calc(100vh - 230px);min-height:360px;border:1px solid var(--line);border-radius:6px;background:var(--surface)}
+@media (max-width:860px){.gridScroll{max-height:75vh}}
+.grid{display:flex;min-width:max-content;position:relative}
+.axis{position:sticky;left:0;z-index:3;background:var(--surface);border-right:1px solid var(--line);flex:0 0 52px}
+.axis .hd,.col .hd{position:sticky;top:0;z-index:2;height:44px;background:var(--surface);border-bottom:1px solid var(--line)}
+.axis .tick{position:absolute;right:6px;font-family:var(--mono);font-size:11px;color:var(--muted);transform:translateY(-50%)}
+.col{border-right:1px solid var(--line);flex:0 0 auto}
+.col .hd{display:flex;align-items:center;gap:8px;padding:0 10px}
+.col .hd h3{font-size:20px;text-transform:uppercase}
+.col .hd .mono{font-size:11px;color:var(--muted)}
+.lane{position:relative;background-image:repeating-linear-gradient(to bottom,var(--line) 0 1px,transparent 1px var(--hour))}
+.ev{position:absolute;border-radius:4px;padding:4px 6px;font-size:12px;line-height:1.25;overflow:hidden;text-align:left;cursor:pointer;border:1px solid transparent;display:flex;flex-direction:column;gap:1px;min-height:22px}
+.ev .t{font-family:var(--mono);font-size:10.5px;opacity:.85}
+.ev .n{font-weight:600;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.ev .s{position:absolute;top:3px;right:4px;font-family:var(--mono);font-size:10px;font-weight:600}
+.ev.must{background:var(--teal);color:var(--on-teal)}
+.ev.strong{background:var(--teal-2);color:var(--on-teal)}
+.ev.maybe{background:var(--teal-3);color:var(--ink)}
+.ev.low{background:var(--sunk);color:var(--ink);border-color:var(--line)}
+.ev.busy{background:repeating-linear-gradient(135deg,var(--busy-soft) 0 6px,var(--surface) 6px 12px);color:var(--ink);border-color:var(--busy)}
+.ev.star{box-shadow:inset 0 0 0 3px var(--gold)}
+.ev.clash{opacity:.42}
+.ev:hover{filter:brightness(1.06);z-index:2}
+.ev .n .tagb{font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;display:block;font-weight:600}
+.empty{padding:40px 20px;text-align:center;color:var(--muted)}
+
+/* List */
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:6px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:720px}
+th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{position:sticky;top:0;background:var(--surface);font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+tr.clash td{opacity:.5}
+.reasons{display:flex;flex-wrap:wrap;gap:4px}
+.r{font-size:11px;padding:1px 7px;border-radius:999px;background:var(--sunk);white-space:nowrap}
+.r.neg{color:var(--warn)}
+.scorepill{display:inline-block;min-width:34px;text-align:center;font-family:var(--mono);font-weight:600;padding:2px 6px;border-radius:3px}
+.scorepill.must{background:var(--teal);color:var(--on-teal)} .scorepill.strong{background:var(--teal-2);color:var(--on-teal)} .scorepill.maybe{background:var(--teal-3)} .scorepill.low{background:var(--sunk)}
+.starbtn{background:none;border:1px solid var(--line);border-radius:4px;cursor:pointer;padding:2px 7px;font-size:14px;line-height:1}
+.starbtn[aria-pressed="true"]{background:var(--gold);border-color:var(--gold);color:#1b1400}
+.evname{font-weight:600}
+.evname a{color:inherit}
+.sub{font-size:12px;color:var(--muted)}
+
+/* Drawer */
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(420px,100vw);background:var(--surface);border-left:2px solid var(--ink);z-index:20;display:flex;flex-direction:column;
+  padding:calc(16px + env(safe-area-inset-top,0px)) max(18px,env(safe-area-inset-right,0px)) calc(16px + env(safe-area-inset-bottom,0px)) 18px;overflow:auto;gap:12px;box-shadow:-12px 0 30px rgba(0,0,0,.12)}
+.drawer h2{font-size:26px;line-height:1.05}
+.drawer .facts{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13px}
+.drawer .facts dt{color:var(--muted)} .drawer .facts dd{margin:0}
+.drawer ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:3px}
+.drawer .desc{font-size:13px;color:var(--muted);white-space:pre-line}
+.flag{padding:8px 10px;border-radius:4px;font-size:13px;border:1px solid var(--line);background:var(--sunk)}
+.flag.warn{border-color:var(--warn);color:var(--warn);background:transparent}
+.close{align-self:flex-end}
+
+/* Setup dialog */
+dialog{border:2px solid var(--ink);border-radius:8px;padding:0;background:var(--surface);color:var(--ink);width:min(640px,calc(100vw - 32px));max-height:calc(100vh - 32px)}
+dialog::backdrop{background:rgba(10,18,22,.5)}
+.dlg{padding:20px;display:flex;flex-direction:column;gap:18px;overflow:auto;max-height:calc(100vh - 36px)}
+.dlg section{display:flex;flex-direction:column;gap:10px;padding-top:14px;border-top:1px solid var(--line)}
+.dlg h2{font-size:24px;text-transform:uppercase}
+.dlg h3{font-size:18px;text-transform:uppercase}
+.fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+.field{display:flex;flex-direction:column;gap:3px;min-width:0}
+.field input{padding:7px 9px;border:1px solid var(--line);border-radius:4px;background:var(--paper);width:100%}
+.help{font-size:12.5px;color:var(--muted);max-width:65ch}
+.help a{color:var(--teal)}
+pre.code{background:var(--sunk);padding:10px;border-radius:4px;overflow-x:auto;font:11.5px/1.5 var(--mono);margin:0}
+.conlist{display:flex;flex-direction:column;gap:6px;max-height:240px;overflow:auto}
+.conrow{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:6px 8px;border:1px solid var(--line);border-radius:4px}
+.conrow .sub{display:flex;gap:6px;flex-wrap:wrap}
+
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:10px 16px;border-radius:6px;max-width:min(560px,calc(100vw - 32px));z-index:40;font-size:13px}
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="brand"><h1>Con Game Planner</h1><span class="tag">Tabletop.Events × BGG</span></div>
+  <div class="conpick">
+    <label class="label" for="conSelect">Convention</label>
+    <select id="conSelect"></select>
+  </div>
+  <div class="chips" id="chips"></div>
+  <button class="btn primary" id="openSetup" type="button">Setup</button>
+</header>
+<div class="status" id="status" hidden><span id="statusText"></span><span class="bar"><i id="statusBar"></i></span><button class="linkbtn" id="cancelBtn" type="button" hidden>Cancel</button></div>
+<div class="banner" id="sampleBanner"><span><strong>Example data.</strong> This is a made-up weekend con with a sample collection so you can see how the planner ranks events. Sign in under Setup to load your own conventions and BGG collection.</span><button class="btn small" type="button" id="bannerSetup">Open setup</button></div>
+
+<div class="layout">
+  <aside class="side">
+    <div class="panel">
+      <h2>Filter</h2>
+      <input class="search" id="q" type="search" placeholder="Search event names" aria-label="Search event names">
+      <div class="slider">
+        <label for="minScore">Minimum score</label><output id="minScoreOut" for="minScore"></output>
+        <input type="range" id="minScore" min="0" max="80" step="5">
+      </div>
+      <label class="check"><input type="checkbox" id="hideBusy"> Hide events that clash with ones I'm hosting or registered for</label>
+      <label class="check"><input type="checkbox" id="seatsOnly"> Only events with open seats</label>
+      <div class="slider">
+        <label for="buffer">Walking buffer (minutes)</label><output id="bufferOut" for="buffer"></output>
+        <input type="range" id="buffer" min="0" max="60" step="5">
+      </div>
+      <div>
+        <div class="label">Event types</div>
+        <div class="types" id="types"></div>
+      </div>
+    </div>
+    <details class="panel collapse" id="weightsPanel">
+      <summary>Scoring</summary>
+      <p class="help">Each match adds points. Drag to change what matters most.</p>
+      <div id="weights" style="display:flex;flex-direction:column;gap:10px"></div>
+      <button class="btn small" type="button" id="resetWeights">Reset to defaults</button>
+    </details>
+  </aside>
+
+  <main style="min-width:0">
+    <div class="viewbar">
+      <div class="tabs" role="tablist">
+        <button role="tab" id="tabGrid" aria-selected="true" type="button">Calendar</button>
+        <button role="tab" id="tabList" aria-selected="false" type="button">Ranked list</button>
+        <button role="tab" id="tabStar" aria-selected="false" type="button">My shortlist</button>
+      </div>
+      <div class="legend">
+        <span><i class="sw must"></i>Must play</span><span><i class="sw strong"></i>Strong</span><span><i class="sw maybe"></i>Maybe</span>
+        <span><i class="sw busy"></i>Hosting or registered</span><span><i class="sw star"></i>Shortlisted</span>
+      </div>
+    </div>
+    <div class="summary" id="summary"></div>
+    <div class="cta" id="lookupCta" hidden></div>
+    <section id="gridView"><div class="gridScroll"><div class="grid" id="grid"></div></div></section>
+    <section id="listView" hidden><div class="tablewrap"><table><thead><tr><th>Score</th><th>When</th><th>Event</th><th>Why</th><th>Seats</th><th></th></tr></thead><tbody id="listBody"></tbody></table></div></section>
+  </main>
+</div>
+
+<aside class="drawer" id="drawer" hidden aria-label="Event details"></aside>
+
+<dialog id="setup">
+  <div class="dlg">
+    <div class="row"><h2>Setup</h2><button class="btn small" type="button" id="closeSetup">Done</button></div>
+
+    <section>
+      <h3>1 · Tabletop.Events</h3>
+      <p class="help">Sign-in needs a free developer API key: on Tabletop.Events open Account → Preferences, answer Yes to “Are you a developer?”, save, then use the new API Keys link to request one. Your password is sent only to sign in and is never saved.</p>
+      <div class="fields">
+        <div class="field"><label class="label" for="tteUser">Username</label><input id="tteUser" autocomplete="username"></div>
+        <div class="field"><label class="label" for="ttePass">Password</label><input id="ttePass" type="password" autocomplete="current-password"></div>
+        <div class="field"><label class="label" for="tteKey">API key ID</label><input id="tteKey" autocomplete="off"></div>
+      </div>
+      <div class="row" style="justify-content:flex-start;flex-wrap:wrap">
+        <button class="btn primary" type="button" id="loginBtn">Sign in and find my conventions</button>
+        <button class="linkbtn" type="button" id="logoutBtn" hidden>Sign out</button>
+      </div>
+      <div id="conArea" hidden>
+        <div class="label">Your conventions</div>
+        <div class="conlist" id="conList"></div>
+        <div class="row" style="justify-content:flex-start;gap:8px">
+          <input class="search" id="conSearch" placeholder="Find another convention by name" aria-label="Find a convention by name" style="max-width:320px">
+          <button class="btn small" type="button" id="conSearchBtn">Search</button>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h3>2 · BoardGameGeek</h3>
+      <p class="help">Your token is stored only in this browser on this device. Don't paste it into the HTML file itself if the file lives in a public GitHub repo.</p>
+      <div class="fields">
+        <div class="field"><label class="label" for="bggUser">BGG username</label><input id="bggUser" autocomplete="off"></div>
+        <div class="field"><label class="label" for="bggToken">API token</label><input id="bggToken" type="password" autocomplete="off"></div>
+      </div>
+      <div class="row" style="justify-content:flex-start">
+        <button class="btn primary" type="button" id="bggBtn">Load my collection</button>
+      </div>
+    </section>
+
+    <section>
+      <h3>3 · Request proxy (only if needed)</h3>
+      <p class="help">Some sites refuse calls from pages hosted elsewhere. If sign-in or the BGG load fails with a “couldn't be reached” message, deploy the small Cloudflare Worker below (free tier is plenty), paste its URL here, and try again. It only forwards requests to tabletop.events and boardgamegeek.com, and only for your page.</p>
+      <div class="field"><label class="label" for="proxy">Proxy URL</label><input id="proxy" placeholder="https://con-proxy.yourname.workers.dev" autocomplete="off"></div>
+      <details><summary class="linkbtn" style="display:inline">Show Worker code</summary>
+<pre class="code">// Cloudflare Worker: forwards only to TTE and BGG, only for your page
+const ALLOWED_ORIGIN = 'https://prpost98.github.io'; // change if your Pages URL differs
+export default {
+  async fetch(req) {
+    const cors = {
+      'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
+      'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+      'Access-Control-Allow-Headers': 'Authorization,Content-Type',
+      'Vary': 'Origin'
+    };
+    if (req.method === 'OPTIONS') return new Response(null, { headers: cors });
+    if (req.headers.get('Origin') !== ALLOWED_ORIGIN) return new Response('Forbidden', { status: 403 });
+    const target = new URL(req.url).searchParams.get('url') || '';
+    if (!/^https:\/\/(tabletop\.events|boardgamegeek\.com)\//.test(target))
+      return new Response('Not allowed', { status: 403, headers: cors });
+    const init = { method: req.method, headers: {} };
+    const auth = req.headers.get('Authorization'); if (auth) init.headers.Authorization = auth;
+    const ct = req.headers.get('Content-Type'); if (ct) init.headers['Content-Type'] = ct;
+    if (req.method === 'POST') init.body = await req.text();
+    const r = await fetch(target, init);
+    const h = new Headers(r.headers);
+    for (const [k, v] of Object.entries(cors)) h.set(k, v);
+    return new Response(r.body, { status: r.status, headers: h });
+  }
+};</pre>
+      </details>
+    </section>
+
+    <section>
+      <h3>Saved data</h3>
+      <p class="help">Conventions, BGG lookups and your shortlist are cached in this browser so reloading is instant.</p>
+      <div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap">
+        <button class="btn small" type="button" id="clearLookups">Clear BGG lookup cache</button>
+        <button class="btn small" type="button" id="showSample">Show example data</button>
+      </div>
+    </section>
+  </div>
+</dialog>
+
+<div class="toast" id="toast" hidden></div>
+
+<script>
+'use strict';
+/* ---------- tiny helpers ---------- */
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const store = {
+  get(k, d){ try { const v = localStorage.getItem('cgp.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v){ try { localStorage.setItem('cgp.' + k, JSON.stringify(v)); return true; } catch { return false; } },
+  del(k){ try { localStorage.removeItem('cgp.' + k); } catch {} }
+};
+let toastTimer;
+function toast(msg, ms = 5000){ const t = $('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, ms); }
+
+/* ---------- state ---------- */
+const W_DEF = { wtp:40, wish:25, liked:30, shelf:10, loved:15, bgg:25, inter:20, familiar:10 };
+const W_LABEL = {
+  wtp:'On my Want to Play list', wish:'On my wishlist (higher priority = more)', liked:'Liked on Tabletop.Events',
+  shelf:'Owned but never played', loved:'I rated it 8+', bgg:'High BGG rating (6.5 → 8+)',
+  inter:'Highly interactive / big table', familiar:'Penalty: played 5+ times already'
+};
+const S = {
+  settings: Object.assign({ tteUser:'', tteKey:'', bggUser:'', bggToken:'', proxy:'', buffer:15, minScore:15, hideBusy:true, seatsOnly:false, excludedTypes:[], weights:{...W_DEF} }, store.get('settings', {})),
+  session: store.get('session', null),
+  cons: store.get('cons', []),
+  con: null,
+  collection: store.get('collection', []),
+  things: store.get('things', {}),
+  titles: store.get('titles', {}),
+  shortlist: store.get('shortlist', {}),
+  sample: false,
+  view: 'grid',
+  query: '',
+  cancel: false
+};
+S.settings.weights = Object.assign({...W_DEF}, S.settings.weights || {});
+const SAMPLE_THINGS = {}, SAMPLE_TITLES = {};
+const thing = id => S.things[id] || (S.sample ? SAMPLE_THINGS[id] : null) || null;
+const titleCands = k => S.titles[k] || (S.sample ? SAMPLE_TITLES[k] : null);
+function leaveSample(){ if (S.sample){ S.sample = false; S.collection = store.get('collection', []); } }
+const saveSettings = () => store.set('settings', S.settings);
+
+/* ---------- network ---------- */
+function gate(minGap){ let last = 0, chain = Promise.resolve();
+  return fn => { const p = chain.then(async () => { const w = last + minGap - Date.now(); if (w > 0) await sleep(w); last = Date.now(); return fn(); }); chain = p.catch(() => {}); return p; }; }
+const tteGate = gate(1100), bggGate = gate(2100);
+function viaProxy(url){ const p = (S.settings.proxy || '').trim().replace(/\/+$/, ''); return p ? p + (p.includes('?') ? '&' : '/?') + 'url=' + encodeURIComponent(url) : url; }
+async function netFetch(url, opts, label){
+  try { return await fetch(viaProxy(url), opts); }
+  catch { throw new Error(`${label} couldn't be reached from this page. Your browser most likely blocked the cross-site request. Add a request proxy under Setup → 3, then try again.`); }
+}
+async function tte(path, params = {}, method = 'GET'){
+  const u = new URL('https://tabletop.events/api/' + path);
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v != null && v !== '') q.append(k, v);
+  if (S.session?.sid && !q.has('session_id')) q.set('session_id', S.session.sid);
+  const opts = { method };
+  if (method === 'GET') u.search = q.toString(); else opts.body = q;
+  const r = await tteGate(() => netFetch(u.toString(), opts, 'Tabletop.Events'));
+  let j; try { j = await r.json(); } catch { throw new Error(`Tabletop.Events sent back an unreadable reply (HTTP ${r.status}).`); }
+  if (j.error){ const e = new Error(j.error.message || 'Tabletop.Events returned an error.'); e.code = j.error.code; throw e; }
+  return j.result;
+}
+async function ttePaged(path, params = {}, onPage, maxPages = 400){
+  const all = []; let page = 1;
+  for (;;){
+    if (S.cancel) throw new Error('Cancelled.');
+    const res = await tte(path, { ...params, _items_per_page:100, _page_number:page });
+    const items = res?.items || [];
+    all.push(...items);
+    const tp = res?.paging?.total_pages || 1;
+    onPage && onPage(page, tp);
+    if (page >= tp || page >= maxPages || !items.length) break;
+    page++;
+  }
+  return all;
+}
+async function bgg(path, params){
+  const u = new URL('https://boardgamegeek.com/xmlapi2/' + path);
+  u.search = new URLSearchParams(params).toString();
+  const opts = { headers: { Authorization: 'Bearer ' + S.settings.bggToken.trim() } };
+  for (let i = 0; i < 10; i++){
+    const r = await bggGate(() => netFetch(u.toString(), opts, 'BoardGameGeek'));
+    if (r.status === 202){ await sleep(4000); continue; }
+    if (r.status === 429){ await sleep(10000); continue; }
+    if (r.status === 401) throw new Error('BoardGameGeek rejected the API token. Check it under Setup → 2.');
+    if (!r.ok) throw new Error(`BoardGameGeek returned HTTP ${r.status}.`);
+    const doc = new DOMParser().parseFromString(await r.text(), 'application/xml');
+    const err = doc.querySelector('errors error message, error message');
+    if (err) throw new Error('BoardGameGeek: ' + err.textContent);
+    return doc;
+  }
+  throw new Error('BoardGameGeek is still preparing that data. Try again in a minute.');
+}
+
+/* ---------- status bar ---------- */
+function status(text, frac){ $('status').hidden = !text; $('statusText').textContent = text || ''; $('statusBar').style.width = frac == null ? '0' : Math.round(frac * 100) + '%'; }
+async function task(label, fn, cancellable = false){
+  S.cancel = false; $('cancelBtn').hidden = !cancellable; status(label, 0);
+  try { return await fn(); }
+  catch (e){ if (e.message !== 'Cancelled.') toast(e.message, 9000); else toast('Stopped. What finished so far is saved.'); throw e; }
+  finally { status(''); $('cancelBtn').hidden = true; }
+}
+
+/* ---------- time ---------- */
+const fmtCache = {};
+function fmt(tz){ if (!fmtCache[tz]) { try { fmtCache[tz] = new Intl.DateTimeFormat('en-US', { timeZone:tz, year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', weekday:'short', hourCycle:'h23' }); } catch { fmtCache[tz] = fmt(Intl.DateTimeFormat().resolvedOptions().timeZone); } } return fmtCache[tz]; }
+function zoned(ms, tz){ const p = {}; fmt(tz).formatToParts(new Date(ms)).forEach(x => p[x.type] = x.value); return { y:+p.year, mo:+p.month, d:+p.day, h:(+p.hour) % 24, mi:+p.minute, wd:p.weekday }; }
+const DAY_START_H = 4; // events before 4am belong to the previous con day
+function dayOf(ms, tz){ const z = zoned(ms - DAY_START_H * 3600e3, tz); return { key:`${z.y}-${String(z.mo).padStart(2,'0')}-${String(z.d).padStart(2,'0')}`, wd:z.wd, md:`${z.mo}/${z.d}` }; }
+function minuteOf(ms, tz){ const z = zoned(ms, tz); let m = z.h * 60 + z.mi; if (z.h < DAY_START_H) m += 1440; return m; }
+function clock(ms, tz){ const z = zoned(ms, tz); const h = z.h % 12 || 12; return `${h}:${String(z.mi).padStart(2,'0')}${z.h < 12 ? 'a' : 'p'}`; }
+const parseTTE = s => s ? Date.parse(String(s).replace(' ', 'T') + 'Z') : NaN;
+const hrs = m => m >= 60 ? (m % 60 ? `${(m/60).toFixed(1)}h` : `${m/60}h`) : `${m}m`;
+
+/* ---------- titles & matching ---------- */
+function normKey(s){ return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim().replace(/^the /, ''); }
+const PREFIX = /^\s*(?:learn(?:\s+(?:to|and|&)\s+play)?|how\s+to\s+play|demo|teach(?:ing)?|intro(?:duction)?(?:\s+to)?|beginners?'?|new\s+players?|play\s*(?:and|&)\s*learn|tournament|qualifier|playtest|featured|game)\s*[:\-–—|]?\s+/i;
+const SKIP = /\b(seminar|panel|paint|workshop|open gaming|open play|meet ?up|social|ceremony|auction|raffle|library|registration|volunteer|lunch|dinner|break|swap|flea|vendor|exhibit|costume|cosplay|trivia night)\b/i;
+function cleanTitle(name){
+  let s = String(name || '').replace(/\[[^\]]*\]|\([^)]*\)/g, ' ');
+  for (let i = 0; i < 3; i++) s = s.replace(PREFIX, '');
+  s = s.split(/\s+[-–—|:]\s+|\s*\|\s*/)[0];
+  s = s.replace(/\b(demo|learn to play|tournament|teach|open play|full game)\b.*$/i, '');
+  return s.replace(/\s+/g, ' ').trim();
+}
+let colById = new Map(), colIndex = [];
+function buildCollectionIndex(){
+  colById = new Map(S.collection.map(c => [c.id, c]));
+  const keys = [], seenShort = {};
+  for (const c of S.collection){
+    const k = normKey(c.name); if (k) keys.push({ k, id:c.id });
+    const base = normKey(String(c.name).split(/:|–|—/)[0]);
+    if (base && base !== k && base.length >= 5) seenShort[base] = (seenShort[base] || []).concat(c.id);
+  }
+  for (const [k, ids] of Object.entries(seenShort)) if (ids.length === 1 && !keys.some(x => x.k === k)) keys.push({ k, id:ids[0] });
+  keys.sort((a, b) => b.k.length - a.k.length);
+  colIndex = keys;
+}
+function bestCandidate(ids){ let best = null, bu = -1; for (const id of ids || []){ const t = thing(id); const u = t ? (t.users || 0) : 0; if (u > bu){ bu = u; best = id; } } return best; }
+function matchEvent(e){
+  const full = ' ' + normKey(e.name) + ' ';
+  const ct = normKey(cleanTitle(e.name));
+  for (const { k, id } of colIndex){
+    if (k.length < 4){ if (ct === k) return { id, src:'collection' }; continue; }
+    if (full.includes(' ' + k + ' ')) return { id, src:'collection' };
+  }
+  const cands = titleCands(ct);
+  if (cands && cands.length){ const id = bestCandidate(cands); if (id) return { id, src:'bgg' }; }
+  return null;
+}
+
+/* ---------- scoring ---------- */
+const INTERACTIVE = /negotiat|trading|voting|hidden role|traitor|team-based|communication limit|real-time|bluff|deduction|auction|bidding|semi-cooperative|party game/i;
+function gameInfo(e){
+  if (!e.game) return null;
+  const c = colById.get(e.game.id) || null, t = thing(e.game.id);
+  return { id:e.game.id, c, t, name:(t && t.name) || (c && c.name) || '' };
+}
+function scoreEvent(e){
+  const w = S.settings.weights, reasons = []; let score = 0;
+  const add = (pts, text, neg) => { pts = Math.round(pts); if (!pts) return; score += pts; reasons.push({ pts, text, neg:!!neg }); };
+  const g = gameInfo(e), c = g?.c, t = g?.t;
+  if (c?.wtp) add(w.wtp, 'Want to Play');
+  if (c?.wish){ const p = c.wishPri || 3; add(w.wish * (6 - p) / 5, `Wishlist (priority ${p})`); }
+  if (S.con?.liked?.includes(e.id)) add(w.liked, 'Liked on TTE');
+  if (c?.own && !c.plays) add(w.shelf, 'Owned, unplayed');
+  if (c?.my >= 8) add(w.loved * Math.min(1, (c.my - 7) / 3), `You rated it ${c.my}`);
+  const r = t?.bayes || c?.bayes || t?.avg || c?.avg;
+  if (r && r > 6.5) add(w.bgg * Math.min(1, (r - 6.5) / 1.5), `BGG ${r.toFixed(1)}`);
+  const tags = t ? [...(t.mech || []), ...(t.cat || [])].filter(x => INTERACTIVE.test(x)) : [];
+  const maxp = t?.maxp || c?.maxp || 0, big = e.max >= 6 || maxp >= 6;
+  if (tags.length) add(w.inter * (big ? 1 : 0.6), `Interactive: ${[...new Set(tags)].slice(0, 2).join(', ')}`);
+  else if (big && e.game) add(w.inter * 0.3, `Big table (${Math.max(e.max, maxp)})`);
+  if (c?.plays >= 5) add(-w.familiar, `Played ${c.plays}×`, true);
+  return { score, reasons };
+}
+const tier = s => s >= 60 ? 'must' : s >= 35 ? 'strong' : s >= 15 ? 'maybe' : 'low';
+
+/* ---------- derived view model ---------- */
+function overlaps(a, b, bufMin){ const buf = bufMin * 60e3; return a.start < b.end + buf && b.start < a.end + buf; }
+function starred(){ return new Set(S.shortlist[S.con?.id] || []); }
+function compute(){
+  const con = S.con; if (!con) return [];
+  const busy = con.events.filter(e => e.busy);
+  const stars = starred(), buf = S.settings.buffer;
+  const starredEvents = con.events.filter(e => stars.has(e.id));
+  for (const e of con.events){
+    e.end = e.start + e.dur * 60e3;
+    if (e.busy){ e.score = 0; e.reasons = []; continue; }
+    const r = scoreEvent(e); e.score = r.score; e.reasons = r.reasons;
+    e.clashBusy = busy.filter(b => overlaps(e, b, buf)).map(b => b.name);
+    e.clashStar = starredEvents.filter(s => s.id !== e.id && overlaps(e, s, buf)).map(s => s.name);
+  }
+  const ex = new Set(S.settings.excludedTypes), q = S.query.trim().toLowerCase();
+  return con.events.filter(e => {
+    if (e.busy || stars.has(e.id)) return true;
+    if (ex.has(e.type || 'Other')) return false;
+    if (q) { if (!e.name.toLowerCase().includes(q)) return false; }
+    else if (e.score < S.settings.minScore) return false;
+    if (S.settings.seatsOnly && e.max > 0 && seatsLeft(e) <= 0) return false;
+    if (S.settings.hideBusy && e.clashBusy.length) return false;
+    return true;
+  });
+}
+const seatsLeft = e => e.avail != null ? e.avail : Math.max(0, e.max - e.taken);
+
+/* ---------- rendering ---------- */
+function renderAll(){
+  buildCollectionIndex();
+  if (S.con) for (const e of S.con.events) if (!e.busy || !e.game) e.game = matchEvent(e);
+  renderChips(); renderConSelect(); renderTypes(); renderView();
+}
+function renderView(){
+  const vis = compute();
+  renderSummary(vis); renderCta();
+  if (S.view === 'grid') renderGrid(vis); else renderList(vis);
+}
+function renderChips(){
+  const tteOk = !!S.session?.sid, bggOk = S.collection.length > 0;
+  $('chips').innerHTML =
+    `<span class="chip ${tteOk ? 'ok' : ''}"><i class="dot"></i>${tteOk ? 'TTE: ' + esc(S.session.name || 'signed in') : 'TTE: not signed in'}</span>` +
+    `<span class="chip ${bggOk ? 'ok' : ''}"><i class="dot"></i>${bggOk ? 'BGG: ' + S.collection.length + ' games' : 'BGG: not loaded'}</span>`;
+  $('sampleBanner').hidden = !S.sample;
+}
+function renderConSelect(){
+  const sel = $('conSelect'); const opts = [];
+  if (S.sample) opts.push(`<option value="__sample">Sample Con (example data)</option>`);
+  for (const c of S.cons) opts.push(`<option value="${esc(c.id)}">${esc(c.name)}${c.tags?.length ? ' · ' + esc(c.tags.join(', ')) : ''}</option>`);
+  if (!opts.length) opts.push('<option value="">No conventions yet. Open Setup.</option>');
+  sel.innerHTML = opts.join('');
+  sel.value = S.sample ? '__sample' : (S.con?.id || '');
+}
+function renderTypes(){
+  const types = [...new Set((S.con?.events || []).filter(e => !e.busy).map(e => e.type || 'Other'))].sort();
+  const ex = new Set(S.settings.excludedTypes);
+  $('types').innerHTML = types.length ? types.map((t, i) =>
+    `<label class="check"><input type="checkbox" data-type="${esc(t)}" id="type${i}" ${ex.has(t) ? '' : 'checked'}> ${esc(t)}</label>`).join('')
+    : '<span class="sub">Load a convention to see its event types.</span>';
+}
+function groupByDay(list){
+  const tz = S.con.tz, days = new Map();
+  for (const e of S.con.events){ const d = dayOf(e.start, tz); if (!days.has(d.key)) days.set(d.key, { ...d, all:[], vis:[] }); days.get(d.key).all.push(e); }
+  for (const e of list){ days.get(dayOf(e.start, tz).key).vis.push(e); }
+  return [...days.values()].sort((a, b) => a.key.localeCompare(b.key));
+}
+function renderSummary(vis){
+  if (!S.con){ $('summary').innerHTML = ''; return; }
+  const stars = starred();
+  $('summary').innerHTML = groupByDay(vis).map(d => {
+    const busyMin = d.all.filter(e => e.busy).reduce((a, e) => a + e.dur, 0);
+    const starMin = d.all.filter(e => stars.has(e.id)).reduce((a, e) => a + e.dur, 0);
+    const must = d.vis.filter(e => !e.busy && e.score >= 60 && !e.clashStar?.length).length;
+    return `<div class="daycard"><h3>${esc(d.wd)} <span class="mono" style="font-size:13px;color:var(--muted)">${esc(d.md)}</span></h3>
+      <span class="facts">${busyMin ? hrs(busyMin) + ' committed · ' : ''}${starMin ? hrs(starMin) + ' shortlisted · ' : ''}${must} must-play open</span></div>`;
+  }).join('');
+}
+function renderCta(){
+  const el = $('lookupCta');
+  if (!S.con || S.sample){ el.hidden = true; return; }
+  const n = pendingLookups();
+  if (!S.settings.bggToken){ el.hidden = false; el.innerHTML = `<span>Add your BGG token under Setup to score events by your collection and BGG ratings.</span><button class="btn small" type="button" data-act="setup">Open setup</button>`; return; }
+  if (!n.total){ el.hidden = true; return; }
+  const mins = Math.ceil(n.total * 2.2 / 60);
+  el.hidden = false;
+  el.innerHTML = `<span><strong>${n.titles}</strong> event games aren't in your collection and <strong>${n.things}</strong> need BGG details. Looking them up adds BGG ratings and interaction data (about ${mins} min, runs in the background, saved for next time).</span><button class="btn small primary" type="button" data-act="lookup">Look up on BGG</button>`;
+}
+function renderGrid(vis){
+  const g = $('grid');
+  if (!S.con){ g.innerHTML = `<div class="empty">Open Setup to sign in and choose a convention.</div>`; return; }
+  const tz = S.con.tz, days = groupByDay(vis).filter(d => d.vis.length);
+  if (!days.length){ g.innerHTML = `<div class="empty">Nothing matches these filters. Try lowering the minimum score.</div>`; return; }
+  let lo = Infinity, hi = -Infinity;
+  for (const d of days) for (const e of d.vis){ const m = minuteOf(e.start, tz); lo = Math.min(lo, m); hi = Math.max(hi, m + e.dur); }
+  lo = Math.floor(lo / 60) * 60; hi = Math.min(Math.ceil(hi / 60) * 60, lo + 26 * 60);
+  const HPX = 64, px = m => (m - lo) / 60 * HPX, H = px(hi), stars = starred();
+  let axis = `<div class="axis"><div class="hd"></div><div style="position:relative;height:${H}px">`;
+  for (let m = lo + 60; m < hi; m += 60){ const h = Math.floor(m / 60) % 24; axis += `<span class="tick" style="top:${px(m)}px">${h % 12 || 12}${h < 12 ? 'a' : 'p'}</span>`; }
+  axis += `</div></div>`;
+  const cols = days.map(d => {
+    const evs = d.vis.slice().sort((a, b) => a.start - b.start || b.dur - a.dur);
+    const laneEnds = [];
+    for (const e of evs){ let i = laneEnds.findIndex(end => end <= e.start); if (i < 0){ i = laneEnds.length; laneEnds.push(0); } laneEnds[i] = e.end; e._lane = i; }
+    const lanes = Math.max(1, laneEnds.length), LW = 128, width = Math.max(220, lanes * LW + 8);
+    const blocks = evs.map(e => {
+      const top = px(minuteOf(e.start, tz)), h = Math.max(24, e.dur / 60 * HPX - 3);
+      const cls = e.busy ? 'busy' : tier(e.score);
+      const isStar = stars.has(e.id), clash = !e.busy && !isStar && e.clashStar?.length;
+      const label = e.busy ? `<span class="tagb">${e.busy === 'hosting' ? 'Hosting' : 'Registered'}</span>` : '';
+      return `<button type="button" class="ev ${cls} ${isStar ? 'star' : ''} ${clash ? 'clash' : ''}" data-id="${esc(e.id)}"
+        style="top:${top}px;height:${h}px;left:${4 + e._lane * LW}px;width:${LW - 6}px" title="${esc(e.name)}">
+        ${e.busy ? '' : `<span class="s">${e.score}</span>`}<span class="t">${clock(e.start, tz)}</span><span class="n">${label}${esc(e.name)}</span></button>`;
+    }).join('');
+    return `<div class="col" style="width:${width}px"><div class="hd"><h3>${esc(d.wd)}</h3><span class="mono">${esc(d.md)} · ${d.vis.filter(e => !e.busy).length} shown</span></div>
+      <div class="lane" style="height:${H}px;--hour:${HPX}px">${blocks}</div></div>`;
+  }).join('');
+  g.innerHTML = axis + cols;
+}
+function reasonChips(e){ return `<div class="reasons">${(e.reasons || []).map(r => `<span class="r ${r.neg ? 'neg' : ''}">${esc(r.text)} ${r.pts > 0 ? '+' : ''}${r.pts}</span>`).join('')}</div>`; }
+function renderList(vis){
+  const tz = S.con?.tz, stars = starred();
+  let rows = vis.filter(e => !e.busy);
+  if (S.view === 'star') rows = (S.con?.events || []).filter(e => stars.has(e.id) || e.busy).sort((a, b) => a.start - b.start);
+  else rows.sort((a, b) => b.score - a.score || a.start - b.start);
+  if (!rows.length){ $('listBody').innerHTML = `<tr><td colspan="6" class="empty">${S.view === 'star' ? 'Nothing shortlisted yet. Tap ☆ on an event to add it.' : 'Nothing matches these filters.'}</td></tr>`; return; }
+  $('listBody').innerHTML = rows.slice(0, 600).map(e => {
+    const d = dayOf(e.start, tz), isStar = stars.has(e.id);
+    const clash = !e.busy && !isStar && e.clashStar?.length;
+    const seats = e.max ? `${seatsLeft(e)}/${e.max}` : '—';
+    return `<tr class="${clash ? 'clash' : ''}">
+      <td>${e.busy ? `<span class="scorepill low">${e.busy === 'hosting' ? 'Host' : 'Reg'}</span>` : `<span class="scorepill ${tier(e.score)}">${e.score}</span>`}</td>
+      <td class="num">${esc(d.wd)} ${clock(e.start, tz)}<div class="sub">${hrs(e.dur)}</div></td>
+      <td><div class="evname"><button class="linkbtn" style="color:inherit;text-decoration:none" data-id="${esc(e.id)}" type="button">${esc(e.name)}</button></div><div class="sub">${esc(e.type || '')}${e.room ? ' · ' + esc(e.room) : ''}${clash ? ' · clashes with ' + esc(e.clashStar[0]) : ''}</div></td>
+      <td>${e.busy ? '' : reasonChips(e)}</td>
+      <td class="num">${seats}</td>
+      <td>${e.busy ? '' : `<button type="button" class="starbtn" data-star="${esc(e.id)}" aria-pressed="${isStar}" aria-label="Shortlist">${isStar ? '★' : '☆'}</button>`}</td></tr>`;
+  }).join('');
+}
+function openDrawer(id){
+  const e = S.con?.events.find(x => x.id === id); if (!e) return;
+  const tz = S.con.tz, d = dayOf(e.start, tz), g = gameInfo(e), isStar = starred().has(e.id);
+  const desc = e.desc ? new DOMParser().parseFromString(e.desc, 'text/html').body.textContent.trim() : '';
+  const flags = [];
+  if (e.busy) flags.push(`<div class="flag">You're ${e.busy === 'hosting' ? 'hosting' : 'registered for'} this event.</div>`);
+  if (e.clashBusy?.length) flags.push(`<div class="flag warn">Clashes with ${esc(e.clashBusy.join(', '))}, which you're hosting or registered for.</div>`);
+  if (e.clashStar?.length && !isStar) flags.push(`<div class="flag warn">Overlaps your shortlisted ${esc(e.clashStar.join(', '))}.</div>`);
+  if (e.sessions > 1) flags.push(`<div class="flag">This event has ${e.sessions} sessions. Only the first is shown here.</div>`);
+  const dr = $('drawer');
+  dr.innerHTML = `<button class="btn small close" type="button" data-act="close">Close</button>
+    <div class="label">${esc(e.type || 'Event')}${e.num ? ' · #' + esc(e.num) : ''}</div>
+    <h2>${esc(e.name)}</h2>
+    ${flags.join('')}
+    <dl class="facts">
+      <dt>When</dt><dd class="mono">${esc(d.wd)} ${esc(d.md)}, ${clock(e.start, tz)}–${clock(e.end, tz)} (${hrs(e.dur)})</dd>
+      ${e.room ? `<dt>Where</dt><dd>${esc(e.room)}</dd>` : ''}
+      <dt>Seats</dt><dd class="mono">${e.max ? `${seatsLeft(e)} open of ${e.max}` : 'Unticketed'}</dd>
+      ${e.price ? `<dt>Price</dt><dd class="mono">$${e.price.toFixed(2)}</dd>` : ''}
+      ${g ? `<dt>Matched game</dt><dd>${esc(g.name)} ${g.c ? '(in your collection)' : '(found on BGG)'}${g.t?.weight ? ` · weight ${g.t.weight.toFixed(1)}` : ''}${g.t?.maxp ? ` · ${g.t.minp}–${g.t.maxp} players` : ''}</dd>` : `<dt>Matched game</dt><dd class="sub">No match yet</dd>`}
+    </dl>
+    ${e.busy ? '' : `<div><div class="label">Score ${e.score}</div><ul>${(e.reasons || []).map(r => `<li>${esc(r.text)}: ${r.pts > 0 ? '+' : ''}${r.pts}</li>`).join('') || '<li>No signals from your collection</li>'}</ul></div>`}
+    <div class="row" style="justify-content:flex-start;flex-wrap:wrap">
+      ${e.busy ? '' : `<button class="btn ${isStar ? '' : 'primary'}" type="button" data-star="${esc(e.id)}">${isStar ? 'Remove from shortlist' : 'Add to shortlist'}</button>`}
+      ${e.url ? `<a class="btn" href="${esc(e.url)}" target="_blank" rel="noopener">Open on Tabletop.Events</a>` : ''}
+      ${g ? `<a class="btn" href="https://boardgamegeek.com/boardgame/${esc(g.id)}" target="_blank" rel="noopener">BGG page</a>` : ''}
+    </div>
+    ${desc ? `<div class="desc">${esc(desc.slice(0, 900))}${desc.length > 900 ? '…' : ''}</div>` : ''}`;
+  dr.hidden = false; dr.dataset.id = id; dr.querySelector('.close').focus();
+}
+function toggleStar(id){
+  const cid = S.con.id, list = new Set(S.shortlist[cid] || []);
+  list.has(id) ? list.delete(id) : list.add(id);
+  S.shortlist[cid] = [...list]; store.set('shortlist', S.shortlist);
+  renderView(); if (!$('drawer').hidden && $('drawer').dataset.id === id) openDrawer(id);
+}
+
+/* ---------- TTE flows ---------- */
+async function login(){
+  const user = $('tteUser').value.trim(), pass = $('ttePass').value, key = $('tteKey').value.trim();
+  if (!user || !pass || !key) return toast('Enter your Tabletop.Events username, password and API key ID.');
+  S.settings.tteUser = user; S.settings.tteKey = key; saveSettings();
+  await task('Signing in to Tabletop.Events…', async () => {
+    S.session = null;
+    const res = await tte('session', { username:user, password:pass, api_key_id:key }, 'POST');
+    S.session = { sid:res.id, uid:res.user_id, name:user };
+    try { const u = await tte('user/' + res.user_id); S.session.name = u.real_name || u.display_name || user; } catch {}
+    store.set('session', S.session);
+    $('ttePass').value = '';
+  });
+  renderChips(); renderSetupState();
+  await loadMyCons();
+}
+async function loadMyCons(){
+  if (!S.session) return;
+  const uid = S.session.uid, found = new Map();
+  const note = (c, tag) => { if (!c?.id) return; const x = found.get(c.id) || { id:c.id, name:c.name || 'Convention', start:c.start_date, ended:!!c.has_ended, tags:[] }; if (!x.tags.includes(tag)) x.tags.push(tag); found.set(c.id, x); };
+  await task('Finding your conventions…', async () => {
+    try {
+      const badges = await ttePaged(`user/${uid}/badges`, { _include_related_objects:'convention' });
+      for (const b of badges){ if (b.convention) note(b.convention, 'Attending'); else if (b.convention_id){ try { note(await tte('convention/' + b.convention_id), 'Attending'); } catch {} } }
+    } catch (e){ if (isSessionError(e)) throw e; }
+    try { (await ttePaged(`user/${uid}/conventions-helping`)).forEach(c => note(c, 'Hosting/volunteering')); } catch {}
+    try { // Not in TTE's public docs; used if it exists
+      const likes = await ttePaged(`user/${uid}/conventionlikes`, { _include_related_objects:'convention' }, null, 5);
+      for (const l of likes) note(l.convention || l, 'Liked');
+    } catch {}
+  }).catch(e => { if (isSessionError(e)) signOut(true); throw e; });
+  S.cons = [...found.values()].filter(c => !c.ended).sort((a, b) => String(a.start).localeCompare(String(b.start)));
+  store.set('cons', S.cons);
+  renderConList(S.cons); renderConSelect();
+  if (!S.cons.length) toast("No upcoming conventions found on your account. Search for one by name below.");
+}
+const isSessionError = e => /session/i.test(e.message) || e.code === 401 || e.code === 450;
+function signOut(expired){
+  S.session = null; store.del('session'); renderChips(); renderSetupState();
+  if (expired){ toast('Your Tabletop.Events sign-in expired. Sign in again under Setup.'); openSetup(); }
+}
+function renderConList(list, isSearch){
+  $('conArea').hidden = !S.session && !isSearch;
+  $('conList').innerHTML = list.length ? list.map(c => `<div class="conrow"><div style="min-width:0"><div class="evname">${esc(c.name)}</div>
+      <div class="sub">${c.start ? `<span class="mono">${esc(String(c.start).slice(0, 10))}</span>` : ''}${(c.tags || []).map(t => `<span class="r">${esc(t)}</span>`).join('')}</div></div>
+      <button class="btn small" type="button" data-load="${esc(c.id)}" data-name="${esc(c.name)}">Load events</button></div>`).join('')
+    : '<div class="sub">None found.</div>';
+}
+async function searchCons(){
+  const q = $('conSearch').value.trim(); if (!q) return;
+  const res = await task('Searching conventions…', () => tte('convention', { query:q, _items_per_page:25 }));
+  renderConList((res.items || []).map(c => ({ id:c.id, name:c.name, start:c.start_date, tags:[] })), true);
+}
+function slimEvent(e){
+  const uri = e.view_uri || '';
+  return { id:e.id, num:e.event_number, name:e.name || 'Untitled event', type:e.type?.name || '', start:parseTTE(e.start_date), dur:+e.duration || 60,
+    max:+(e.max_quantity ?? e.max_tickets ?? 0), taken:+(e.taken_count ?? e.sold_count ?? 0), avail:e.available_quantity != null ? +e.available_quantity : null,
+    price:+(e.actual_price ?? e.price ?? 0), room:e.room_name || e.space_name || '', url:uri ? (uri.startsWith('http') ? uri : 'https://tabletop.events' + uri) : null,
+    desc:String(e.description || '').slice(0, 1200), sessions:+e.session_count || 1, conId:e.convention_id };
+}
+async function loadCon(id, name, force){
+  leaveSample();
+  const cached = !force && store.get('con.' + id, null);
+  if (cached){ S.con = cached; afterConLoad(); toast(`Loaded ${cached.name} from this browser (fetched ${new Date(cached.fetchedAt).toLocaleString()}). Use Refresh in Setup to re-pull.`, 4000); return; }
+  if (!S.session) { toast('Sign in to Tabletop.Events first.'); return openSetup(); }
+  const uid = S.session.uid;
+  const con = await task(`Loading ${name || 'convention'}…`, async () => {
+    const c = await tte('convention/' + id);
+    const tz = c.timezone || c.time_zone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const raw = await ttePaged(`convention/${id}/events`, { is_scheduled:1, is_cancelled:0, _include_related_objects:'type' },
+      (p, tp) => status(`Loading events: page ${p} of ${tp}`, p / tp));
+    const events = raw.map(slimEvent).filter(e => !isNaN(e.start));
+    const byId = new Map(events.map(e => [e.id, e]));
+    const mark = async (evId, kind) => {
+      let e = byId.get(evId);
+      if (!e){ try { const r = await tte('event/' + evId); if (r.convention_id !== id) return; e = slimEvent(r); if (isNaN(e.start)) return; events.push(e); byId.set(e.id, e); } catch { return; } }
+      if (e.busy !== 'hosting') e.busy = kind;
+    };
+    status('Checking your hosted events and tickets…', 0.9);
+    try { for (const h of await ttePaged(`user/${uid}/events-hosted`, { is_scheduled:1 })) if (h.convention_id === id) await mark(h.id, 'hosting'); } catch (e){ if (isSessionError(e)) throw e; }
+    try { for (const t of await ttePaged(`convention/${id}/tickets/my`)) if (t.event_id) await mark(t.event_id, 'registered'); } catch {}
+    try { for (const r of await ttePaged(`user/${uid}/events-reserved`)) if (r.convention_id === id) await mark(r.id, 'registered'); } catch {}
+    let liked = [];
+    try { // eventlikes is documented without its fields; kept only if rows carry this user's id
+      const rows = await ttePaged(`convention/${id}/eventlikes`, { user_id:uid }, null, 5);
+      if (rows.length && rows.every(r => r.user_id === uid)) liked = rows.map(r => r.event_id).filter(Boolean);
+    } catch {}
+    return { id, name:c.name || name, tz, events, liked, fetchedAt:Date.now() };
+  }, true).catch(e => { if (isSessionError(e)) signOut(true); throw e; });
+  S.con = con;
+  if (!store.set('con.' + id, con)) toast('This convention is too big to cache in the browser, so it will re-download next time.');
+  afterConLoad();
+}
+function afterConLoad(){
+  store.set('lastCon', S.con.id);
+  if (!S.cons.some(c => c.id === S.con.id)){ S.cons.push({ id:S.con.id, name:S.con.name, tags:[] }); store.set('cons', S.cons); }
+  $('setup').open && $('setup').close();
+  renderAll();
+}
+
+/* ---------- BGG flows ---------- */
+function parseCollection(doc){
+  const byId = new Map(), num = x => { const v = parseFloat(x); return isNaN(v) ? null : v; };
+  doc.querySelectorAll('items > item').forEach(it => {
+    const st = it.querySelector('status'), stats = it.querySelector('stats'), rating = it.querySelector('stats rating');
+    const g = { id:it.getAttribute('objectid'), name:it.querySelector('name')?.textContent || '', own:st?.getAttribute('own') === '1',
+      wtp:st?.getAttribute('wanttoplay') === '1', wish:st?.getAttribute('wishlist') === '1', wishPri:+(st?.getAttribute('wishlistpriority') || 0),
+      plays:+(it.querySelector('numplays')?.textContent || 0), my:num(rating?.getAttribute('value')),
+      avg:num(rating?.querySelector('average')?.getAttribute('value')), bayes:num(rating?.querySelector('bayesaverage')?.getAttribute('value')),
+      minp:num(stats?.getAttribute('minplayers')), maxp:num(stats?.getAttribute('maxplayers')) };
+    const prev = byId.get(g.id);
+    if (prev){ prev.own ||= g.own; prev.wtp ||= g.wtp; prev.wish ||= g.wish; prev.wishPri ||= g.wishPri; prev.plays = Math.max(prev.plays, g.plays); prev.my ??= g.my; }
+    else byId.set(g.id, g);
+  });
+  return [...byId.values()];
+}
+async function loadCollection(){
+  const user = $('bggUser').value.trim(), token = $('bggToken').value.trim();
+  if (!user || !token) return toast('Enter your BGG username and API token.');
+  S.settings.bggUser = user; S.settings.bggToken = token; saveSettings();
+  const list = await task('Loading your BGG collection (BGG can take a minute to prepare it)…', async () =>
+    parseCollection(await bgg('collection', { username:user, stats:1 })));
+  if (!list.length) return toast(`BGG returned an empty collection for “${user}”. Check the username.`);
+  S.sample = false; S.collection = list; store.set('collection', list);
+  if (!S.con || S.con.id === '__sample'){ S.con = null; const last = store.get('lastCon', null); if (last){ const c = store.get('con.' + last, null); if (c) S.con = c; } }
+  toast(`Loaded ${list.length} games. ${list.filter(g => g.wtp).length} are on your Want to Play list.`);
+  renderAll();
+}
+function parseThings(doc){
+  const num = x => { const v = parseFloat(x); return isNaN(v) || v === 0 ? null : v; };
+  doc.querySelectorAll('items > item').forEach(it => {
+    const v = sel => it.querySelector(sel)?.getAttribute('value');
+    S.things[it.getAttribute('id')] = { name:v('name[type="primary"]') || '', minp:num(v('minplayers')), maxp:num(v('maxplayers')),
+      avg:num(v('statistics ratings average')), bayes:num(v('statistics ratings bayesaverage')), users:+(v('statistics ratings usersrated') || 0),
+      weight:num(v('statistics ratings averageweight')),
+      mech:[...it.querySelectorAll('link[type="boardgamemechanic"]')].map(l => l.getAttribute('value')),
+      cat:[...it.querySelectorAll('link[type="boardgamecategory"]')].map(l => l.getAttribute('value')) };
+  });
+}
+function pendingLookups(){
+  if (!S.con) return { total:0, titles:0, things:0 };
+  const things = new Set(), titles = new Set();
+  for (const e of S.con.events){
+    if (e.busy && !e.game) continue;
+    if (e.game?.id){ if (!S.things[e.game.id]) things.add(e.game.id); continue; }
+    const t = cleanTitle(e.name), k = normKey(t);
+    if (k.length >= 3 && !SKIP.test(e.name) && !(k in S.titles)) titles.add(t);
+  }
+  return { things:things.size, titles:titles.size, thingIds:[...things], titleList:[...titles], total:Math.ceil(things.size / 20) + titles.size * 1.25 };
+}
+async function thingBatch(ids){ for (let i = 0; i < ids.length; i += 20){ if (S.cancel) throw new Error('Cancelled.'); parseThings(await bgg('thing', { id:ids.slice(i, i + 20).join(','), stats:1 })); } }
+async function lookupGames(){
+  const p = pendingLookups(); if (!p.total) return;
+  const saveCaches = () => { store.set('things', S.things); store.set('titles', S.titles); };
+  await task('Looking up games on BGG…', async () => {
+    let done = 0; const total = p.thingIds.length + p.titleList.length, tick = () => status(`Looking up games on BGG: ${done} of ${total}`, done / total);
+    await thingBatch(p.thingIds); done += p.thingIds.length; tick(); saveCaches();
+    let pend = [];
+    for (let i = 0; i < p.titleList.length; i++){
+      if (S.cancel) throw new Error('Cancelled.');
+      const t = p.titleList[i], doc = await bgg('search', { query:t, type:'boardgame', exact:1 });
+      const ids = [...doc.querySelectorAll('items > item')].map(x => x.getAttribute('id')).slice(0, 4);
+      S.titles[normKey(t)] = ids; pend.push(...ids.filter(id => !S.things[id]));
+      done++; tick();
+      if (pend.length >= 20 || i === p.titleList.length - 1){ await thingBatch([...new Set(pend)]); pend = []; saveCaches(); renderAll(); }
+    }
+  }, true).catch(() => {}).finally(() => { saveCaches(); renderAll(); });
+}
+
+/* ---------- sample data ---------- */
+function loadSample(){
+  S.sample = true;
+  const tz = 'America/Chicago', T = (d, h, m = 0) => Date.UTC(2027, 0, 15 + d, h + 6, m);
+  const C = (id, name, o) => ({ id, name, own:false, wtp:false, wish:false, wishPri:0, plays:0, my:null, avg:null, bayes:null, minp:null, maxp:null, ...o });
+  S.collection = [
+    C('342942','Ark Nova',{ wtp:true, bayes:8.4, maxp:4 }), C('366013','Heat: Pedal to the Metal',{ wtp:true, bayes:8.0, maxp:6 }),
+    C('397598','Dune: Imperium – Uprising',{ wtp:true, wish:true, wishPri:2, bayes:8.2, maxp:6 }), C('373106','Sky Team',{ wish:true, wishPri:1, bayes:7.9, maxp:2 }),
+    C('162886','Spirit Island',{ own:true, bayes:8.2, maxp:4 }), C('155821','Inis',{ own:true, bayes:7.6, maxp:4 }),
+    C('224517','Brass: Birmingham',{ own:true, plays:9, my:9, bayes:8.4, maxp:4 }), C('295947','Cascadia',{ own:true, plays:6, my:7, bayes:7.7, maxp:4 }),
+    C('266192','Wingspan',{ own:true, plays:12, my:7, bayes:7.9, maxp:5 }), C('312484','Lost Ruins of Arnak',{ own:true, plays:3, my:8.5, bayes:7.9, maxp:4 }),
+    C('178900','Codenames',{ own:true, plays:15, my:7, bayes:7.5, maxp:8 })
+  ];
+  const TH = (name, maxp, bayes, users, mech, cat = []) => ({ name, minp:2, maxp, avg:bayes + 0.2, bayes, users, weight:null, mech, cat });
+  Object.assign(SAMPLE_THINGS, {
+    '240980':TH('Blood on the Clocktower',20,8.3,9000,['Hidden Roles','Voting','Traitor Game'],['Bluffing','Deduction']),
+    '39463':TH('Cosmic Encounter',8,7.5,30000,['Negotiation','Variable Player Powers'],['Negotiation']),
+    '262543':TH('Wavelength',12,7.2,15000,['Team-Based Game','Communication Limits'],['Party Game']),
+    '128882':TH('The Resistance: Avalon',10,7.4,40000,['Hidden Roles','Voting','Team-Based Game'],['Bluffing','Deduction']),
+    '171131':TH('Captain Sonar',8,7.3,20000,['Team-Based Game','Real-Time','Communication Limits'],[]),
+    '178900':TH('Codenames',8,7.5,100000,['Team-Based Game','Communication Limits'],['Party Game']),
+    '157969':TH('Sheriff of Nottingham',5,7.0,30000,['Negotiation','Trading'],['Bluffing']),
+    '483':TH('Diplomacy',7,6.6,25000,['Negotiation','Simultaneous Action Selection'],['Negotiation']),
+    '233078':TH('Twilight Imperium: Fourth Edition',6,8.4,25000,['Negotiation','Trading','Voting'],[])
+  });
+  for (const [k, id] of [['blood on clocktower','240980'],['cosmic encounter','39463'],['wavelength','262543'],['resistance avalon','128882'],['captain sonar','171131'],['sheriff of nottingham','157969'],['diplomacy','483'],['twilight imperium 4th edition','233078']]) SAMPLE_TITLES[normKey(k)] = [id];
+  const E = (n, d, h, m, dur, max, taken, type, extra = {}) => ({ id:'s' + n.replace(/\W+/g, '') + d + h, num:null, name:n, type, start:T(d, h, m), dur, max, taken, avail:null, price:type === 'Board Game' ? 4 : 0, room:'Hall ' + 'ABC'[d], url:null, desc:'Example event for the sample convention.', sessions:1, ...extra });
+  const events = [
+    E('Learn to Play: Ark Nova',0,14,0,180,4,1,'Board Game'), E('Wingspan',0,14,0,90,5,2,'Board Game'), E('Captain Sonar',0,15,0,60,8,3,'Board Game'),
+    E('Painting Miniatures 101',0,16,0,120,10,4,'Workshop'), E('Blood on the Clocktower',0,18,0,150,15,9,'Board Game'),
+    E('Brass: Birmingham',0,19,0,180,4,3,'Board Game',{ busy:'registered' }), E('Heat: Pedal to the Metal',0,19,0,120,6,2,'Board Game'),
+    E('Codenames Night',0,20,0,120,12,5,'Board Game'), E('Sheriff of Nottingham',0,21,30,60,5,1,'Board Game'),
+    E('Twilight Imperium 4th Edition – Full Game',1,9,0,600,6,4,'Board Game'), E('Learn to Play: Hanami',1,10,0,120,4,3,'Board Game',{ busy:'hosting' }),
+    E('Sky Team',1,10,0,45,2,0,'Board Game'), E('Cascadia',1,10,30,60,4,1,'Board Game'), E('Spirit Island',1,12,0,180,4,2,'Board Game'),
+    E('Cosmic Encounter',1,13,0,120,6,3,'Board Game'), E('Seminar: Designing Your First Game',1,14,0,60,30,12,'Seminar'),
+    E('Dune: Imperium – Uprising',1,15,0,150,4,1,'Board Game'), E('Wavelength',1,16,0,60,12,4,'Board Game'),
+    E('The Resistance: Avalon',1,19,0,60,10,6,'Board Game'), E('Blood on the Clocktower',1,20,0,150,15,14,'Board Game'), E('Inis',1,21,0,120,4,1,'Board Game'),
+    E('Heat: Pedal to the Metal',2,9,0,120,6,1,'Board Game'), E('Lost Ruins of Arnak',2,10,0,120,4,2,'Board Game'), E('Diplomacy',2,11,0,300,7,2,'Board Game'),
+    E('Ark Nova',2,12,0,180,4,3,'Board Game'), E('Captain Sonar',2,13,0,60,8,0,'Board Game'), E('Open Gaming',2,14,0,240,0,0,'Open Play')
+  ];
+  S.con = { id:'__sample', name:'Sample Con (example data)', tz, events, liked:[events.find(e => e.name === 'Wavelength').id], fetchedAt:Date.now() };
+  S.sample = true;
+}
+
+/* ---------- setup dialog ---------- */
+function renderSetupState(){
+  $('tteUser').value = S.settings.tteUser; $('tteKey').value = S.settings.tteKey;
+  $('bggUser').value = S.settings.bggUser; $('bggToken').value = S.settings.bggToken; $('proxy').value = S.settings.proxy;
+  $('logoutBtn').hidden = !S.session; $('loginBtn').textContent = S.session ? 'Sign in again' : 'Sign in and find my conventions';
+  if (S.session){ $('conArea').hidden = false; renderConList(S.cons); }
+}
+function openSetup(){ renderSetupState(); if (!$('setup').open) $('setup').showModal(); }
+
+/* ---------- controls ---------- */
+function renderControls(){
+  const s = S.settings;
+  $('minScore').value = s.minScore; $('minScoreOut').textContent = s.minScore;
+  $('buffer').value = s.buffer; $('bufferOut').textContent = s.buffer;
+  $('hideBusy').checked = s.hideBusy; $('seatsOnly').checked = s.seatsOnly;
+  $('weights').innerHTML = Object.keys(W_DEF).map(k => `<div class="slider"><label for="w_${k}">${esc(W_LABEL[k])}</label><output id="w_${k}_o">${s.weights[k]}</output>
+    <input type="range" id="w_${k}" data-w="${k}" min="0" max="60" step="5" value="${s.weights[k]}"></div>`).join('');
+}
+let rT; const rerender = () => { clearTimeout(rT); rT = setTimeout(renderView, 60); };
+$('minScore').addEventListener('input', e => { S.settings.minScore = +e.target.value; $('minScoreOut').textContent = e.target.value; saveSettings(); rerender(); });
+$('buffer').addEventListener('input', e => { S.settings.buffer = +e.target.value; $('bufferOut').textContent = e.target.value; saveSettings(); rerender(); });
+$('hideBusy').addEventListener('change', e => { S.settings.hideBusy = e.target.checked; saveSettings(); renderView(); });
+$('seatsOnly').addEventListener('change', e => { S.settings.seatsOnly = e.target.checked; saveSettings(); renderView(); });
+$('q').addEventListener('input', e => { S.query = e.target.value; rerender(); });
+$('types').addEventListener('change', e => { const t = e.target.dataset.type; if (t == null) return; const ex = new Set(S.settings.excludedTypes); e.target.checked ? ex.delete(t) : ex.add(t); S.settings.excludedTypes = [...ex]; saveSettings(); renderView(); });
+$('weights').addEventListener('input', e => { const k = e.target.dataset.w; if (!k) return; S.settings.weights[k] = +e.target.value; $(`w_${k}_o`).textContent = e.target.value; saveSettings(); rerender(); });
+$('resetWeights').addEventListener('click', () => { S.settings.weights = { ...W_DEF }; saveSettings(); renderControls(); renderView(); });
+function setView(v){ S.view = v; $('tabGrid').setAttribute('aria-selected', v === 'grid'); $('tabList').setAttribute('aria-selected', v === 'list'); $('tabStar').setAttribute('aria-selected', v === 'star');
+  $('gridView').hidden = v !== 'grid'; $('listView').hidden = v === 'grid'; renderView(); }
+$('tabGrid').onclick = () => setView('grid'); $('tabList').onclick = () => setView('list'); $('tabStar').onclick = () => setView('star');
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-id],[data-star],[data-act],[data-load]'); if (!t) return;
+  if (t.dataset.star){ e.stopPropagation(); return toggleStar(t.dataset.star); }
+  if (t.dataset.load) return loadCon(t.dataset.load, t.dataset.name, true).catch(() => {});
+  if (t.dataset.act === 'close') return $('drawer').hidden = true;
+  if (t.dataset.act === 'setup') return openSetup();
+  if (t.dataset.act === 'lookup') return lookupGames();
+  if (t.dataset.id) return openDrawer(t.dataset.id);
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('drawer').hidden) $('drawer').hidden = true; });
+$('openSetup').onclick = openSetup; $('bannerSetup').onclick = openSetup; $('closeSetup').onclick = () => $('setup').close();
+$('loginBtn').onclick = () => login().catch(() => {});
+$('logoutBtn').onclick = async () => { try { await tte('session/' + S.session.sid, { 'X-HTTP-Method':'DELETE' }, 'POST'); } catch {} signOut(false); };
+$('conSearchBtn').onclick = () => searchCons().catch(() => {});
+$('conSearch').addEventListener('keydown', e => { if (e.key === 'Enter') searchCons().catch(() => {}); });
+$('bggBtn').onclick = () => loadCollection().catch(() => {});
+$('proxy').addEventListener('change', e => { S.settings.proxy = e.target.value.trim(); saveSettings(); });
+$('cancelBtn').onclick = () => { S.cancel = true; };
+$('clearLookups').onclick = () => { S.things = {}; S.titles = {}; store.del('things'); store.del('titles'); toast('BGG lookup cache cleared.'); renderAll(); };
+$('showSample').onclick = () => { loadSample(); $('setup').close(); renderAll(); };
+$('conSelect').addEventListener('change', e => {
+  const id = e.target.value; if (!id) return;
+  if (id === '__sample'){ loadSample(); return renderAll(); }
+  const c = S.cons.find(x => x.id === id); loadCon(id, c?.name).catch(() => renderConSelect());
+});
+
+/* ---------- boot ---------- */
+(function boot(){
+  renderControls();
+  const last = store.get('lastCon', null), cached = last && store.get('con.' + last, null);
+  if (cached && S.collection.length){ S.con = cached; }
+  else if (cached){ S.con = cached; }
+  else loadSample();
+  renderAll();
+})();
+</script>
+</body>
+</html>
