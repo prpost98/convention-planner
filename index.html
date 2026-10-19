@@ -197,7 +197,7 @@ pre.code{background:var(--sunk);padding:10px;border-radius:4px;overflow-x:auto;f
   <aside class="side">
     <div class="panel">
       <h2>Filter</h2>
-      <input class="search" id="q" type="search" placeholder="Search event names" aria-label="Search event names">
+      <input class="search" id="q" type="search" placeholder="Search events or hosts" aria-label="Search events or hosts">
       <div class="slider">
         <label for="minScore">Minimum score</label><output id="minScoreOut" for="minScore"></output>
         <input type="range" id="minScore" min="0" max="80" step="5">
@@ -318,6 +318,7 @@ export default {
       <p class="help">Conventions, BGG lookups and your shortlist are cached in this browser so reloading is instant.</p>
       <div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap">
         <button class="btn small" type="button" id="clearLookups">Clear BGG lookup cache</button>
+        <button class="btn small" type="button" id="clearNoMatch">Undo all “Wrong game” flags</button>
         <button class="btn small" type="button" id="showSample">Show example data</button>
       </div>
     </section>
@@ -356,6 +357,7 @@ const S = {
   things: store.get('things', {}),
   titles: store.get('titles', {}),
   shortlist: store.get('shortlist', {}),
+  noMatch: store.get('noMatch', {}),
   sample: false,
   view: 'grid',
   query: '',
@@ -467,11 +469,14 @@ function buildCollectionIndex(){
 }
 function bestCandidate(ids){ let best = null, bu = -1; for (const id of ids || []){ const t = thing(id); const u = t ? (t.users || 0) : 0; if (u > bu){ bu = u; best = id; } } return best; }
 function matchEvent(e){
+  if (S.noMatch[normKey(e.name)]) return null;
   const full = ' ' + normKey(e.name) + ' ';
   const ct = normKey(cleanTitle(e.name));
   for (const { k, id } of colIndex){
-    if (k.length < 4){ if (ct === k) return { id, src:'collection' }; continue; }
-    if (full.includes(' ' + k + ' ')) return { id, src:'collection' };
+    // The event's title must start with the game name. One-word names ("Cryptid") never match mid-title;
+    // multi-word names ("Ark Nova") may also match anywhere in the event name.
+    if (ct === k || ct.startsWith(k + ' ')) return { id, src:'collection' };
+    if (k.includes(' ') && k.length >= 8 && full.includes(' ' + k + ' ')) return { id, src:'collection' };
   }
   const cands = titleCands(ct);
   if (cands && cands.length){ const id = bestCandidate(cands); if (id) return { id, src:'bgg' }; }
@@ -524,7 +529,7 @@ function compute(){
   return con.events.filter(e => {
     if (e.busy || stars.has(e.id)) return true;
     if (ex.has(e.type || 'Other')) return false;
-    if (q) { if (!e.name.toLowerCase().includes(q)) return false; }
+    if (q) { if (!e.name.toLowerCase().includes(q) && !(e.hosts || []).some(h => h.toLowerCase().includes(q))) return false; }
     else if (e.score < S.settings.minScore) return false;
     if (S.settings.seatsOnly && e.max > 0 && seatsLeft(e) <= 0) return false;
     if (S.settings.hideBusy && e.clashBusy.length) return false;
@@ -661,6 +666,7 @@ function openDrawer(id){
     <dl class="facts">
       <dt>When</dt><dd class="mono">${esc(d.wd)} ${esc(d.md)}, ${clock(e.start, tz)}–${clock(e.end, tz)} (${hrs(e.dur)})</dd>
       ${e.room ? `<dt>Where</dt><dd>${esc(e.room)}</dd>` : ''}
+      <dt>Host</dt><dd id="hostCell">${hostText(e)}</dd>
       <dt>Seats</dt><dd class="mono">${e.max ? `${seatsLeft(e)} open of ${e.max}` : 'Unticketed'}</dd>
       ${e.price ? `<dt>Price</dt><dd class="mono">$${e.price.toFixed(2)}</dd>` : ''}
       ${g ? `<dt>Matched game</dt><dd>${esc(g.name)} ${g.c ? '(in your collection)' : '(found on BGG)'}${g.t?.weight ? ` · weight ${g.t.weight.toFixed(1)}` : ''}${g.t?.maxp ? ` · ${g.t.minp}–${g.t.maxp} players` : ''}</dd>` : `<dt>Matched game</dt><dd class="sub">No match yet</dd>`}
@@ -670,9 +676,24 @@ function openDrawer(id){
       ${e.busy ? '' : `<button class="btn ${isStar ? '' : 'primary'}" type="button" data-star="${esc(e.id)}">${isStar ? 'Remove from shortlist' : 'Add to shortlist'}</button>`}
       ${e.url ? `<a class="btn" href="${esc(e.url)}" target="_blank" rel="noopener">Open on Tabletop.Events</a>` : ''}
       ${g ? `<a class="btn" href="https://boardgamegeek.com/boardgame/${esc(g.id)}" target="_blank" rel="noopener">BGG page</a>` : ''}
+      ${g ? `<button class="btn" type="button" data-act="nomatch">Wrong game</button>` : ''}
     </div>
     ${desc ? `<div class="desc">${esc(desc.slice(0, 900))}${desc.length > 900 ? '…' : ''}</div>` : ''}`;
   dr.hidden = false; dr.dataset.id = id; dr.querySelector('.close').focus();
+  if (e.hosts == null && !S.sample && S.session) fetchHosts(e);
+}
+function hostText(e){
+  if (Array.isArray(e.hosts)) return e.hosts.length ? esc(e.hosts.join(', ')) : '<span class="sub">No host listed</span>';
+  return S.sample || !S.session ? '<span class="sub">Not loaded</span>' : '<span class="sub">Loading…</span>';
+}
+async function fetchHosts(e){
+  try {
+    const res = await tte(`event/${e.id}/hosts`, { _items_per_page:25 });
+    e.hosts = (res?.items || []).map(u => u.display_name || u.real_name).filter(Boolean);
+    if (S.con?.id) store.set('con.' + S.con.id, S.con);
+  } catch { e.hosts = e.hosts ?? null; }
+  const cell = $('hostCell');
+  if (cell && $('drawer').dataset.id === e.id) cell.innerHTML = Array.isArray(e.hosts) ? hostText(e) : '<span class="sub">Couldn\'t load the host</span>';
 }
 function toggleStar(id){
   const cid = S.con.id, list = new Set(S.shortlist[cid] || []);
@@ -739,7 +760,8 @@ function slimEvent(e){
   return { id:e.id, num:e.event_number, name:e.name || 'Untitled event', type:e.type?.name || '', start:parseTTE(e.start_date), dur:+e.duration || 60,
     max:+(e.max_quantity ?? e.max_tickets ?? 0), taken:+(e.taken_count ?? e.sold_count ?? 0), avail:e.available_quantity != null ? +e.available_quantity : null,
     price:+(e.actual_price ?? e.price ?? 0), room:e.room_name || e.space_name || '', url:uri ? (uri.startsWith('http') ? uri : 'https://tabletop.events' + uri) : null,
-    desc:String(e.description || '').slice(0, 1200), sessions:+e.session_count || 1, conId:e.convention_id };
+    desc:String(e.description || '').slice(0, 1200), sessions:+e.session_count || 1, conId:e.convention_id,
+    hosts:Array.isArray(e.hosts) ? e.hosts.map(h => h.name || h.display_name).filter(Boolean) : null };
 }
 async function loadCon(id, name, force){
   leaveSample();
@@ -750,7 +772,7 @@ async function loadCon(id, name, force){
   const con = await task(`Loading ${name || 'convention'}…`, async () => {
     const c = await tte('convention/' + id);
     const tz = c.timezone || c.time_zone || Intl.DateTimeFormat().resolvedOptions().timeZone;
-    const raw = await ttePaged(`convention/${id}/events`, { is_scheduled:1, is_cancelled:0, _include_related_objects:'type' },
+    const raw = await ttePaged(`convention/${id}/events`, { is_scheduled:1, is_cancelled:0, _include_related_objects:'type', _include:'hosts' },
       (p, tp) => status(`Loading events: page ${p} of ${tp}`, p / tp));
     const events = raw.map(slimEvent).filter(e => !isNaN(e.start));
     const byId = new Map(events.map(e => [e.id, e]));
@@ -931,6 +953,9 @@ document.addEventListener('click', e => {
   if (t.dataset.act === 'close') return $('drawer').hidden = true;
   if (t.dataset.act === 'setup') return openSetup();
   if (t.dataset.act === 'lookup') return lookupGames();
+  if (t.dataset.act === 'nomatch'){ const id = $('drawer').dataset.id, ev = S.con?.events.find(x => x.id === id); if (!ev) return;
+    S.noMatch[normKey(ev.name)] = true; store.set('noMatch', S.noMatch); renderAll(); openDrawer(id);
+    return toast('Unlinked. Every event with this exact name now has no game match.'); }
   if (t.dataset.id) return openDrawer(t.dataset.id);
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('drawer').hidden) $('drawer').hidden = true; });
@@ -943,6 +968,7 @@ $('bggBtn').onclick = () => loadCollection().catch(() => {});
 $('proxy').addEventListener('change', e => { S.settings.proxy = e.target.value.trim(); saveSettings(); });
 $('cancelBtn').onclick = () => { S.cancel = true; };
 $('clearLookups').onclick = () => { S.things = {}; S.titles = {}; store.del('things'); store.del('titles'); toast('BGG lookup cache cleared.'); renderAll(); };
+$('clearNoMatch').onclick = () => { S.noMatch = {}; store.del('noMatch'); toast('Wrong-game flags cleared.'); renderAll(); };
 $('showSample').onclick = () => { loadSample(); $('setup').close(); renderAll(); };
 $('conSelect').addEventListener('change', e => {
   const id = e.target.value; if (!id) return;
