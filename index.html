@@ -227,6 +227,7 @@ pre.code{background:var(--sunk);padding:10px;border-radius:4px;overflow-x:auto;f
         <button role="tab" id="tabGrid" aria-selected="true" type="button">Calendar</button>
         <button role="tab" id="tabList" aria-selected="false" type="button">Ranked list</button>
         <button role="tab" id="tabStar" aria-selected="false" type="button">My shortlist</button>
+        <button role="tab" id="tabTogether" aria-selected="false" type="button">Play together</button>
       </div>
       <div class="legend">
         <span><i class="sw must"></i>Must play</span><span><i class="sw strong"></i>Strong</span><span><i class="sw maybe"></i>Maybe</span>
@@ -235,8 +236,13 @@ pre.code{background:var(--sunk);padding:10px;border-radius:4px;overflow-x:auto;f
     </div>
     <div class="summary" id="summary"></div>
     <div class="cta" id="lookupCta" hidden></div>
+    <div class="cta" id="gameFilterBar" hidden></div>
     <section id="gridView"><div class="gridScroll"><div class="grid" id="grid"></div></div></section>
     <section id="listView" hidden><div class="tablewrap"><table><thead><tr><th>Score</th><th>When</th><th>Event</th><th>Why</th><th>Seats</th><th></th></tr></thead><tbody id="listBody"></tbody></table></div></section>
+    <section id="togetherView" hidden>
+      <div class="cta" id="togetherBar"></div>
+      <div class="tablewrap"><table><thead><tr><th>Fit</th><th>Game</th><th>You</th><th id="friendCol">Friend</th><th>BGG</th><th>At this con</th></tr></thead><tbody id="togetherBody"></tbody></table></div>
+    </section>
   </main>
 </div>
 
@@ -278,6 +284,17 @@ pre.code{background:var(--sunk);padding:10px;border-radius:4px;overflow-x:auto;f
       <div class="row" style="justify-content:flex-start">
         <button class="btn primary" type="button" id="bggBtn">Load my collection</button>
       </div>
+    </section>
+
+    <section>
+      <h3>Friends</h3>
+      <p class="help">Add a friend's BGG username to find games you'd both enjoy. Their collection has to be public on BGG, which is the default. Uses your API token.</p>
+      <div class="fields">
+        <div class="field"><label class="label" for="friendUser">Their BGG username</label><input id="friendUser" autocomplete="off"></div>
+        <div class="field"><label class="label" for="friendLabel">Name to show</label><input id="friendLabel" placeholder="Tony" autocomplete="off"></div>
+      </div>
+      <div class="row" style="justify-content:flex-start"><button class="btn primary" type="button" id="addFriend">Add friend</button></div>
+      <div class="conlist" id="friendList"></div>
     </section>
 
     <section>
@@ -342,11 +359,11 @@ let toastTimer;
 function toast(msg, ms = 5000){ const t = $('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, ms); }
 
 /* ---------- state ---------- */
-const W_DEF = { wtp:40, wish:25, liked:30, shelf:10, loved:15, bgg:25, inter:20, familiar:10 };
+const W_DEF = { wtp:40, wish:25, liked:30, shelf:10, loved:15, bgg:25, inter:20, friend:20, familiar:10 };
 const W_LABEL = {
   wtp:'On my Want to Play list', wish:'On my wishlist (higher priority = more)', liked:'Liked on Tabletop.Events',
   shelf:'Owned but never played', loved:'I rated it 8+', bgg:'High BGG rating (6.5 → 8+)',
-  inter:'Highly interactive / big table', familiar:'Penalty: played 5+ times already'
+  inter:'Highly interactive / big table', friend:'A friend wants to play it', familiar:'Penalty: played 5+ times already'
 };
 const S = {
   settings: Object.assign({ tteUser:'', tteKey:'', bggUser:'', bggToken:'', proxy:'', buffer:15, minScore:15, hideBusy:true, seatsOnly:false, excludedTypes:[], weights:{...W_DEF} }, store.get('settings', {})),
@@ -358,6 +375,9 @@ const S = {
   titles: store.get('titles', {}),
   shortlist: store.get('shortlist', {}),
   noMatch: store.get('noMatch', {}),
+  friends: store.get('friends', []),
+  together: { friend:0, conOnly:false },
+  gameFilter: null,
   sample: false,
   view: 'grid',
   query: '',
@@ -454,11 +474,26 @@ function cleanTitle(name){
   s = s.replace(/\b(demo|learn to play|tournament|teach|open play|full game)\b.*$/i, '');
   return s.replace(/\s+/g, ' ').trim();
 }
-let colById = new Map(), colIndex = [];
+let colById = new Map(), colIndex = [], friendMaps = [];
+function buildFriendMaps(){ friendMaps = S.sample ? [] : S.friends.map(f => ({ label:f.label, user:f.user, byId:new Map(f.games.map(g => [g.id, g])) })); }
+function friendGame(id){ for (const f of friendMaps){ const g = f.byId.get(id); if (g) return g; } return null; }
+// How much one person's BGG data says they'd want to play a game
+function interest(g){
+  const why = []; let pts = 0; if (!g) return { pts, why };
+  if (g.wtp){ pts += 3; why.push('Want to play'); }
+  if (g.wish){ pts += 2; why.push(`Wishlist${g.wishPri ? ' (' + g.wishPri + ')' : ''}`); }
+  if (g.my >= 8){ pts += g.my >= 9 ? 3 : 2; why.push(`Rated ${g.my}`); }
+  if (g.own && !g.plays){ pts += 1; why.push('Owns, unplayed'); }
+  else if (g.own){ pts += 0.5; why.push('Owns'); }
+  return { pts, why };
+}
 function buildCollectionIndex(){
   colById = new Map(S.collection.map(c => [c.id, c]));
+  buildFriendMaps();
+  const all = new Map(colById);
+  for (const f of friendMaps) for (const [id, g] of f.byId) if (!all.has(id)) all.set(id, g);
   const keys = [], seenShort = {};
-  for (const c of S.collection){
+  for (const c of all.values()){
     const k = normKey(c.name); if (k) keys.push({ k, id:c.id });
     const base = normKey(String(c.name).split(/:|–|—/)[0]);
     if (base && base !== k && base.length >= 5) seenShort[base] = (seenShort[base] || []).concat(c.id);
@@ -488,7 +523,7 @@ const INTERACTIVE = /negotiat|trading|voting|hidden role|traitor|team-based|comm
 function gameInfo(e){
   if (!e.game) return null;
   const c = colById.get(e.game.id) || null, t = thing(e.game.id);
-  return { id:e.game.id, c, t, name:(t && t.name) || (c && c.name) || '' };
+  return { id:e.game.id, c, t, name:(t && t.name) || (c && c.name) || friendGame(e.game.id)?.name || '' };
 }
 function scoreEvent(e){
   const w = S.settings.weights, reasons = []; let score = 0;
@@ -505,6 +540,11 @@ function scoreEvent(e){
   const maxp = t?.maxp || c?.maxp || 0, big = e.max >= 6 || maxp >= 6;
   if (tags.length) add(w.inter * (big ? 1 : 0.6), `Interactive: ${[...new Set(tags)].slice(0, 2).join(', ')}`);
   else if (big && e.game) add(w.inter * 0.3, `Big table (${Math.max(e.max, maxp)})`);
+  if (g && friendMaps.length){
+    let best = null;
+    for (const f of friendMaps){ const i = interest(f.byId.get(g.id)); if (i.pts >= 1 && (!best || i.pts > best.i.pts)) best = { f, i }; }
+    if (best) add(w.friend * Math.min(1, best.i.pts / 3), `${best.f.label}: ${best.i.why[0]}`);
+  }
   if (c?.plays >= 5) add(-w.familiar, `Played ${c.plays}×`, true);
   return { score, reasons };
 }
@@ -525,6 +565,7 @@ function compute(){
     e.clashBusy = busy.filter(b => overlaps(e, b, buf)).map(b => b.name);
     e.clashStar = starredEvents.filter(s => s.id !== e.id && overlaps(e, s, buf)).map(s => s.name);
   }
+  if (S.gameFilter) return con.events.filter(e => e.busy || stars.has(e.id) || e.game?.id === S.gameFilter);
   const ex = new Set(S.settings.excludedTypes), q = S.query.trim().toLowerCase();
   return con.events.filter(e => {
     if (e.busy || stars.has(e.id)) return true;
@@ -546,8 +587,47 @@ function renderAll(){
 }
 function renderView(){
   const vis = compute();
-  renderSummary(vis); renderCta();
-  if (S.view === 'grid') renderGrid(vis); else renderList(vis);
+  renderSummary(vis); renderCta(); renderGameFilter();
+  if (S.view === 'grid') renderGrid(vis); else if (S.view === 'together') renderTogether(); else renderList(vis);
+}
+function renderGameFilter(){
+  const bar = $('gameFilterBar');
+  if (!S.gameFilter || S.view === 'together'){ bar.hidden = true; return; }
+  const name = thing(S.gameFilter)?.name || colById.get(S.gameFilter)?.name || friendGame(S.gameFilter)?.name || 'this game';
+  bar.hidden = false;
+  bar.innerHTML = `<span>Showing only <strong>${esc(name)}</strong> events, plus what you're hosting or registered for.</span><button class="btn small" type="button" data-act="clearGame">Show all events</button>`;
+}
+const whyChips = why => `<div class="reasons">${why.map(w => `<span class="r">${esc(w)}</span>`).join('') || '<span class="sub">—</span>'}</div>`;
+function renderTogether(){
+  const bar = $('togetherBar'), body = $('togetherBody');
+  if (!friendMaps.length){
+    $('friendCol').textContent = 'Friend';
+    bar.innerHTML = `<span>${S.sample ? 'Load your own collection, then add' : 'Add'} a friend's BGG username under Setup → Friends to see games you'd both enjoy.</span><button class="btn small" type="button" data-act="setup">Open setup</button>`;
+    body.innerHTML = ''; return;
+  }
+  const fi = Math.min(S.together.friend, friendMaps.length - 1), f = friendMaps[fi];
+  bar.innerHTML = `<label class="label" for="togetherFriend">With</label><select id="togetherFriend">${friendMaps.map((x, i) => `<option value="${i}" ${i === fi ? 'selected' : ''}>${esc(x.label)}</option>`).join('')}</select>
+    <label class="check"><input type="checkbox" id="togetherCon" ${S.together.conOnly ? 'checked' : ''}> Only games with events at this con</label>`;
+  $('friendCol').textContent = f.label;
+  const atCon = new Map(), tz = S.con?.tz;
+  for (const e of S.con?.events || []) if (e.game && !e.busy){ const a = atCon.get(e.game.id) || []; a.push(e); atCon.set(e.game.id, a); }
+  const rows = [];
+  for (const id of new Set([...colById.keys(), ...f.byId.keys()])){
+    const mine = colById.get(id), theirs = f.byId.get(id), me = interest(mine), them = interest(theirs);
+    if (!me.pts || !them.pts || me.pts + them.pts < 3) continue;
+    const evs = (atCon.get(id) || []).sort((a, b) => a.start - b.start);
+    if (S.together.conOnly && !evs.length) continue;
+    rows.push({ id, name:thing(id)?.name || mine?.name || theirs?.name, me, them, evs,
+      rating:thing(id)?.bayes || mine?.bayes || theirs?.bayes, fit:me.pts + them.pts + (evs.length ? 1 : 0) });
+  }
+  rows.sort((a, b) => b.fit - a.fit || (b.rating || 0) - (a.rating || 0));
+  body.innerHTML = rows.length ? rows.slice(0, 400).map(r => `<tr>
+      <td><span class="scorepill ${r.fit >= 6 ? 'must' : r.fit >= 4.5 ? 'strong' : 'maybe'}">${Math.round(r.fit * 2) / 2}</span></td>
+      <td class="evname"><a href="https://boardgamegeek.com/boardgame/${esc(r.id)}" target="_blank" rel="noopener">${esc(r.name)}</a></td>
+      <td>${whyChips(r.me.why)}</td><td>${whyChips(r.them.why)}</td>
+      <td class="num">${r.rating ? r.rating.toFixed(1) : '—'}</td>
+      <td>${r.evs.length ? `<button class="linkbtn" type="button" data-game="${esc(r.id)}">${r.evs.length} event${r.evs.length > 1 ? 's' : ''}</button><div class="sub">first: ${esc(dayOf(r.evs[0].start, tz).wd)} ${clock(r.evs[0].start, tz)}</div>` : '<span class="sub">None</span>'}</td></tr>`).join('')
+    : `<tr><td colspan="6" class="empty">No overlap yet. This list fills in from Want to Play, wishlists, ratings of 8+, and games either of you owns.</td></tr>`;
 }
 function renderChips(){
   const tteOk = !!S.session?.sid, bggOk = S.collection.length > 0;
@@ -670,6 +750,7 @@ function openDrawer(id){
       <dt>Seats</dt><dd class="mono">${e.max ? `${seatsLeft(e)} open of ${e.max}` : 'Unticketed'}</dd>
       ${e.price ? `<dt>Price</dt><dd class="mono">$${e.price.toFixed(2)}</dd>` : ''}
       ${g ? `<dt>Matched game</dt><dd>${esc(g.name)} ${g.c ? '(in your collection)' : '(found on BGG)'}${g.t?.weight ? ` · weight ${g.t.weight.toFixed(1)}` : ''}${g.t?.maxp ? ` · ${g.t.minp}–${g.t.maxp} players` : ''}</dd>` : `<dt>Matched game</dt><dd class="sub">No match yet</dd>`}
+      ${g && friendMaps.length ? `<dt>Friends</dt><dd>${friendMaps.map(f => { const i = interest(f.byId.get(g.id)); return i.why.length ? `${esc(f.label)}: ${esc(i.why.join(', '))}` : ''; }).filter(Boolean).join('<br>') || '<span class="sub">No signals</span>'}</dd>` : ''}
     </dl>
     ${e.busy ? '' : `<div><div class="label">Score ${e.score}</div><ul>${(e.reasons || []).map(r => `<li>${esc(r.text)}: ${r.pts > 0 ? '+' : ''}${r.pts}</li>`).join('') || '<li>No signals from your collection</li>'}</ul></div>`}
     <div class="row" style="justify-content:flex-start;flex-wrap:wrap">
@@ -922,6 +1003,27 @@ function renderSetupState(){
   $('bggUser').value = S.settings.bggUser; $('bggToken').value = S.settings.bggToken; $('proxy').value = S.settings.proxy;
   $('logoutBtn').hidden = !S.session; $('loginBtn').textContent = S.session ? 'Sign in again' : 'Sign in and find my conventions';
   if (S.session){ $('conArea').hidden = false; renderConList(S.cons); }
+  renderFriends();
+}
+function renderFriends(){
+  $('friendList').innerHTML = S.friends.map((f, i) => `<div class="conrow"><div style="min-width:0"><div class="evname">${esc(f.label)}</div>
+    <div class="sub"><span class="mono">${esc(f.user)}</span> · ${f.games.length} games · ${f.games.filter(g => g.wtp).length} want to play · ${f.games.filter(g => g.my >= 8).length} rated 8+</div></div>
+    <div class="row"><button class="btn small" type="button" data-frefresh="${i}">Refresh</button><button class="btn small" type="button" data-fremove="${i}">Remove</button></div></div>`).join('');
+}
+async function addFriend(user, label){
+  user = (user || '').trim(); label = (label || '').trim() || user;
+  if (!user) return toast("Enter your friend's BGG username.");
+  if (!S.settings.bggToken) return toast('Add your own BGG token first, under Setup → 2.');
+  const list = await task(`Loading ${label}'s BGG collection…`, async () => parseCollection(await bgg('collection', { username:user, stats:1 })));
+  if (!list.length) return toast(`BGG returned an empty collection for “${user}”. Check the username, and that the collection is public.`);
+  const games = list.map(({ id, name, own, wtp, wish, wishPri, plays, my, bayes }) => ({ id, name, own, wtp, wish, wishPri, plays, my, bayes }));
+  const i = S.friends.findIndex(f => f.user.toLowerCase() === user.toLowerCase());
+  const entry = { user, label, games, fetchedAt:Date.now() };
+  if (i >= 0) S.friends[i] = entry; else S.friends.push(entry);
+  store.set('friends', S.friends);
+  $('friendUser').value = ''; $('friendLabel').value = '';
+  renderFriends(); renderAll();
+  toast(`Added ${label}: ${games.length} games, ${games.filter(g => g.wtp).length} on Want to Play.`);
 }
 function openSetup(){ renderSetupState(); if (!$('setup').open) $('setup').showModal(); }
 
@@ -943,11 +1045,22 @@ $('q').addEventListener('input', e => { S.query = e.target.value; rerender(); })
 $('types').addEventListener('change', e => { const t = e.target.dataset.type; if (t == null) return; const ex = new Set(S.settings.excludedTypes); e.target.checked ? ex.delete(t) : ex.add(t); S.settings.excludedTypes = [...ex]; saveSettings(); renderView(); });
 $('weights').addEventListener('input', e => { const k = e.target.dataset.w; if (!k) return; S.settings.weights[k] = +e.target.value; $(`w_${k}_o`).textContent = e.target.value; saveSettings(); rerender(); });
 $('resetWeights').addEventListener('click', () => { S.settings.weights = { ...W_DEF }; saveSettings(); renderControls(); renderView(); });
-function setView(v){ S.view = v; $('tabGrid').setAttribute('aria-selected', v === 'grid'); $('tabList').setAttribute('aria-selected', v === 'list'); $('tabStar').setAttribute('aria-selected', v === 'star');
-  $('gridView').hidden = v !== 'grid'; $('listView').hidden = v === 'grid'; renderView(); }
-$('tabGrid').onclick = () => setView('grid'); $('tabList').onclick = () => setView('list'); $('tabStar').onclick = () => setView('star');
+function setView(v){ S.view = v;
+  for (const [id, name] of [['tabGrid','grid'],['tabList','list'],['tabStar','star'],['tabTogether','together']]) $(id).setAttribute('aria-selected', v === name);
+  $('gridView').hidden = v !== 'grid'; $('listView').hidden = !(v === 'list' || v === 'star'); $('togetherView').hidden = v !== 'together'; renderView(); }
+$('tabGrid').onclick = () => setView('grid'); $('tabList').onclick = () => setView('list'); $('tabStar').onclick = () => setView('star'); $('tabTogether').onclick = () => setView('together');
+$('togetherBar').addEventListener('change', e => {
+  if (e.target.id === 'togetherFriend') S.together.friend = +e.target.value;
+  if (e.target.id === 'togetherCon') S.together.conOnly = e.target.checked;
+  renderTogether();
+});
+$('addFriend').onclick = () => addFriend($('friendUser').value, $('friendLabel').value).catch(() => {});
 document.addEventListener('click', e => {
-  const t = e.target.closest('[data-id],[data-star],[data-act],[data-load]'); if (!t) return;
+  const t = e.target.closest('[data-id],[data-star],[data-act],[data-load],[data-game],[data-frefresh],[data-fremove]'); if (!t) return;
+  if (t.dataset.game){ S.gameFilter = t.dataset.game; return setView('grid'); }
+  if (t.dataset.act === 'clearGame'){ S.gameFilter = null; return renderView(); }
+  if (t.dataset.frefresh){ const f = S.friends[+t.dataset.frefresh]; return f && addFriend(f.user, f.label).catch(() => {}); }
+  if (t.dataset.fremove){ S.friends.splice(+t.dataset.fremove, 1); store.set('friends', S.friends); S.together.friend = 0; renderFriends(); return renderAll(); }
   if (t.dataset.star){ e.stopPropagation(); return toggleStar(t.dataset.star); }
   if (t.dataset.load) return loadCon(t.dataset.load, t.dataset.name, true).catch(() => {});
   if (t.dataset.act === 'close') return $('drawer').hidden = true;
