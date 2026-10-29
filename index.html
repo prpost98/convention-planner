@@ -253,6 +253,30 @@ pre.code{background:var(--sunk);padding:10px;border-radius:4px;overflow-x:auto;f
     <div class="row"><h2>Setup</h2><button class="btn small" type="button" id="closeSetup">Done</button></div>
 
     <section>
+      <h3>Sync across devices</h3>
+      <p class="help">Sign in to save your settings, BGG token, TTE sign-in, shortlist, friends and game lookups to your own Supabase database. Convention event lists still reload from Tabletop.Events on each new device.</p>
+      <p class="help" id="syncNotConfigured" hidden>Sync isn't set up yet: paste your Supabase anon key into the top of index.html.</p>
+      <div id="syncSignedOut" hidden>
+        <div class="fields">
+          <div class="field"><label class="label" for="sbEmail">Email</label><input id="sbEmail" type="email" autocomplete="username"></div>
+          <div class="field"><label class="label" for="sbPass">Password</label><input id="sbPass" type="password" autocomplete="current-password"></div>
+        </div>
+        <div class="row" style="justify-content:flex-start;flex-wrap:wrap">
+          <button class="btn primary" type="button" id="sbSignIn">Sign in</button>
+          <button class="btn" type="button" id="sbSignUp">Create account</button>
+        </div>
+      </div>
+      <div id="syncSignedIn" hidden>
+        <div class="row" style="justify-content:flex-start;flex-wrap:wrap">
+          <span id="syncWho"></span>
+          <button class="btn small" type="button" id="sbSyncNow">Sync now</button>
+          <button class="linkbtn" type="button" id="sbSignOut">Sign out</button>
+        </div>
+      </div>
+      <div class="sub" id="syncStatus"></div>
+    </section>
+
+    <section>
       <h3>1 · Tabletop.Events</h3>
       <p class="help">Sign-in needs a free developer API key: on Tabletop.Events open Account → Preferences, answer Yes to “Are you a developer?”, save, then use the new API Keys link to request one. Your password is sent only to sign in and is never saved.</p>
       <div class="fields">
@@ -344,16 +368,20 @@ export default {
 
 <div class="toast" id="toast" hidden></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script>
 'use strict';
+/* ---------- cloud sync config: Supabase → Project Settings → API ---------- */
+const SUPABASE_URL = 'https://yokazfpgbjotdggkyumg.supabase.co'; // change if you use a different project
+const SUPABASE_ANON_KEY = 'sb_publishable_g4Sy3-7Mrq3JXk7C5WJ2WA_SI7rhub8'; // paste the "anon" public key here. It's safe in a public repo: row-level security protects the data.
 /* ---------- tiny helpers ---------- */
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const store = {
   get(k, d){ try { const v = localStorage.getItem('cgp.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
-  set(k, v){ try { localStorage.setItem('cgp.' + k, JSON.stringify(v)); return true; } catch { return false; } },
-  del(k){ try { localStorage.removeItem('cgp.' + k); } catch {} }
+  set(k, v){ let ok = true; try { localStorage.setItem('cgp.' + k, JSON.stringify(v)); } catch { ok = false; } if (cloud) cloud.mark(k, v); return ok; },
+  del(k){ try { localStorage.removeItem('cgp.' + k); } catch {} if (cloud) cloud.mark(k, undefined); }
 };
 let toastTimer;
 function toast(msg, ms = 5000){ const t = $('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, ms); }
@@ -385,6 +413,93 @@ const S = {
 };
 S.settings.weights = Object.assign({...W_DEF}, S.settings.weights || {});
 const SAMPLE_THINGS = {}, SAMPLE_TITLES = {};
+
+/* ---------- cloud sync (Supabase) ---------- */
+// Small, frequently changed data and the bigger caches sync as two separate rows.
+const SYNC_GROUPS = { settings:'prefs', session:'prefs', shortlist:'prefs', noMatch:'prefs', cons:'prefs', lastCon:'prefs',
+  collection:'cache', things:'cache', titles:'cache', friends:'cache' };
+var cloud = {
+  client:null, user:null, timers:{}, dirty:{}, applying:false, lastPull:0, mem:{},
+  last:(() => { try { return JSON.parse(localStorage.getItem('cgp.syncLast')) || {}; } catch { return {}; } })(),
+  ready(){ return !!(this.client && this.user); },
+  mark(k, v){
+    const g = SYNC_GROUPS[k]; if (!g) return;
+    this.mem[k] = v;                       // keeps a copy even if browser storage is full
+    if (this.applying || !this.ready()) return;
+    this.dirty[g] = true; clearTimeout(this.timers[g]);
+    this.timers[g] = setTimeout(() => this.push(g), g === 'prefs' ? 1500 : 6000);
+  },
+  collect(g){
+    const o = {};
+    for (const [k, gg] of Object.entries(SYNC_GROUPS)) if (gg === g){ const v = k in this.mem ? this.mem[k] : store.get(k, undefined); if (v !== undefined) o[k] = v; }
+    return o;
+  },
+  saveLast(){ try { localStorage.setItem('cgp.syncLast', JSON.stringify(this.last)); } catch {} },
+  async push(g){
+    if (!this.ready()) return;
+    clearTimeout(this.timers[g]);
+    const updated_at = new Date().toISOString();
+    const { error } = await this.client.from('con_planner').upsert({ user_id:this.user.id, key:g, data:this.collect(g), updated_at });
+    if (error) return syncStatus('Sync failed: ' + error.message, true);
+    this.dirty[g] = false; this.last[g] = updated_at; this.saveLast();
+    syncStatus('Saved to your account at ' + new Date().toLocaleTimeString());
+  },
+  flush(){ for (const g of ['prefs', 'cache']) if (this.dirty[g]) this.push(g); },
+  async pull(first){
+    if (!this.ready()) return;
+    const { data, error } = await this.client.from('con_planner').select('key,data,updated_at');
+    if (error) return syncStatus('Sync failed: ' + error.message, true);
+    this.lastPull = Date.now();
+    const rows = Object.fromEntries((data || []).map(r => [r.key, r]));
+    let changed = false;
+    for (const g of ['prefs', 'cache']){
+      const r = rows[g];
+      if (!r){ if (first){ this.dirty[g] = true; await this.push(g); } continue; }
+      if (this.dirty[g]) continue;
+      if (this.last[g] && Date.parse(r.updated_at) <= Date.parse(this.last[g])) continue;
+      this.applying = true;
+      try { for (const [k, v] of Object.entries(r.data || {})){ this.mem[k] = v; store.set(k, v); } } finally { this.applying = false; }
+      this.last[g] = r.updated_at; changed = true;
+    }
+    this.saveLast();
+    if (changed) afterSyncApply();
+    syncStatus('Up to date as of ' + new Date().toLocaleTimeString());
+  }
+};
+function syncStatus(text, bad){ const el = document.getElementById('syncStatus'); if (el){ el.textContent = text; el.style.color = bad ? 'var(--warn)' : ''; } if (bad) toast(text, 8000); }
+const synced = k => k in cloud.mem ? cloud.mem[k] : store.get(k, undefined);
+function afterSyncApply(){
+  S.settings = Object.assign(S.settings, synced('settings') || {});
+  S.settings.weights = Object.assign({ ...W_DEF }, S.settings.weights || {});
+  S.session = synced('session') ?? null; S.cons = synced('cons') || []; S.shortlist = synced('shortlist') || {}; S.noMatch = synced('noMatch') || {};
+  S.things = synced('things') || {}; S.titles = synced('titles') || {}; S.friends = synced('friends') || [];
+  const col = synced('collection') || [];
+  if (S.sample && col.length) S.sample = false;
+  if (!S.sample) S.collection = col;
+  const last = synced('lastCon');
+  if (!S.sample && last && S.con?.id !== last){
+    const c = store.get('con.' + last, null);
+    S.con = c;
+    if (!c && S.session){ const meta = S.cons.find(x => x.id === last); loadCon(last, meta?.name).catch(() => {}); }
+  } else if (S.con?.id === '__sample' && !S.sample) S.con = null;
+  renderControls(); renderSetupState(); renderAll();
+  toast('Loaded your saved setup from your account.', 3500);
+}
+function renderSyncState(){
+  const configured = !!cloud.client, inn = cloud.ready();
+  $('syncSignedOut').hidden = inn || !configured; $('syncSignedIn').hidden = !inn;
+  $('syncNotConfigured').hidden = configured;
+  if (inn) $('syncWho').textContent = 'Signed in as ' + (cloud.user.email || 'you');
+}
+async function cloudAuth(create){
+  if (!cloud.client) return toast('Sync isn’t set up yet. Add your Supabase anon key at the top of index.html.');
+  const email = $('sbEmail').value.trim(), password = $('sbPass').value;
+  if (!email || !password) return toast('Enter your email and a password.');
+  const { data, error } = create ? await cloud.client.auth.signUp({ email, password }) : await cloud.client.auth.signInWithPassword({ email, password });
+  if (error) return toast(error.message, 8000);
+  $('sbPass').value = '';
+  if (create && !data.session) toast('Account created. Confirm it from the email Supabase sent, then sign in here.', 10000);
+}
 const thing = id => S.things[id] || (S.sample ? SAMPLE_THINGS[id] : null) || null;
 const titleCands = k => S.titles[k] || (S.sample ? SAMPLE_TITLES[k] : null);
 function leaveSample(){ if (S.sample){ S.sample = false; S.collection = store.get('collection', []); } }
@@ -633,7 +748,8 @@ function renderChips(){
   const tteOk = !!S.session?.sid, bggOk = S.collection.length > 0;
   $('chips').innerHTML =
     `<span class="chip ${tteOk ? 'ok' : ''}"><i class="dot"></i>${tteOk ? 'TTE: ' + esc(S.session.name || 'signed in') : 'TTE: not signed in'}</span>` +
-    `<span class="chip ${bggOk ? 'ok' : ''}"><i class="dot"></i>${bggOk ? 'BGG: ' + S.collection.length + ' games' : 'BGG: not loaded'}</span>`;
+    `<span class="chip ${bggOk ? 'ok' : ''}"><i class="dot"></i>${bggOk ? 'BGG: ' + S.collection.length + ' games' : 'BGG: not loaded'}</span>` +
+    `<span class="chip ${cloud.ready() ? 'ok' : ''}"><i class="dot"></i>${cloud.ready() ? 'Sync on' : 'Sync off'}</span>`;
   $('sampleBanner').hidden = !S.sample;
 }
 function renderConSelect(){
@@ -1003,7 +1119,7 @@ function renderSetupState(){
   $('bggUser').value = S.settings.bggUser; $('bggToken').value = S.settings.bggToken; $('proxy').value = S.settings.proxy;
   $('logoutBtn').hidden = !S.session; $('loginBtn').textContent = S.session ? 'Sign in again' : 'Sign in and find my conventions';
   if (S.session){ $('conArea').hidden = false; renderConList(S.cons); }
-  renderFriends();
+  renderFriends(); renderSyncState();
 }
 function renderFriends(){
   $('friendList').innerHTML = S.friends.map((f, i) => `<div class="conrow"><div style="min-width:0"><div class="evname">${esc(f.label)}</div>
@@ -1097,7 +1213,27 @@ $('conSelect').addEventListener('change', e => {
   else if (cached){ S.con = cached; }
   else loadSample();
   renderAll();
+  if (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase){
+    try {
+      cloud.client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, storageKey:'cgp.supabase' } });
+      cloud.client.auth.onAuthStateChange((event, session) => {
+        const was = cloud.user?.id; cloud.user = session?.user || null;
+        renderSyncState(); renderChips();
+        if (cloud.user && cloud.user.id !== was) setTimeout(() => cloud.pull(true), 0);
+      });
+    } catch (e){ console.warn('Supabase sync unavailable', e); cloud.client = null; }
+  }
+  renderSyncState(); renderChips();
 })();
+$('sbSignIn').onclick = () => cloudAuth(false);
+$('sbSignUp').onclick = () => cloudAuth(true);
+$('sbSignOut').onclick = async () => { cloud.flush(); await cloud.client?.auth.signOut(); toast('Signed out of sync. This browser keeps its local copy.'); };
+$('sbSyncNow').onclick = async () => { cloud.flush(); await cloud.pull(false); };
+document.addEventListener('visibilitychange', () => {
+  if (!cloud.ready()) return;
+  if (document.visibilityState === 'hidden') cloud.flush();
+  else if (Date.now() - cloud.lastPull > 60000) cloud.pull(false);
+});
 </script>
 </body>
 </html>
